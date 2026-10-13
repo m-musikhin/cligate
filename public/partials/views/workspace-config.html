@@ -740,12 +740,14 @@
                                                     <div class="flex items-center gap-2">
                                                         <span class="inline-flex items-center h-5 px-2 rounded text-[10px] font-mono font-bold"
                                                             :class="{
+                                                                'bg-purple-500/20 text-purple-400': tier === 'fable',
                                                                 'bg-red-500/20 text-red-400': tier === 'flagship',
                                                                 'bg-blue-500/20 text-blue-400': tier === 'standard',
                                                                 'bg-green-500/20 text-green-400': tier === 'fast',
-                                                                'bg-yellow-500/20 text-yellow-400': tier === 'reasoning'
+                                                                'bg-yellow-500/20 text-yellow-400': tier === 'reasoning',
+                                                                'bg-gray-500/20 text-gray-400': tier === 'default'
                                                             }"
-                                                            x-text="tier"></span>
+                                                            x-text="modelMappingData.tiers[tier]?.label || tier"></span>
                                                     </div>
                                                     <div class="text-[10px] text-gray-600 mt-0.5" x-text="modelMappingData.tiers[tier]?.description"></div>
                                                 </td>

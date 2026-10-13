@@ -4,11 +4,13 @@
  * Maps any incoming model name (from Codex, Claude Code, etc.) to the
  * correct model on the target API provider using a capability tier system.
  *
- * Tiers:
+ * Tiers (order = display order in the model-mapping UI):
+ *   fable     — above flagship; Claude Code 5.x tier (display name: Frontier)
  *   flagship  — Most capable, highest cost (gpt-5.4, opus, gemini-2.5-pro)
+ *   reasoning — Deep thinking (o1, o3, o4)
  *   standard  — Daily workhorse (gpt-5.2, sonnet, gemini-2.5-flash)
  *   fast      — Quick & cheap (gpt-4o-mini, haiku, gemini-2.0-flash)
- *   reasoning — Deep thinking (o1, o3, o4)
+ *   default   — Fallback for models that match no recognized tier
  *
  * Recognition is keyword-based so future model versions auto-classify.
  * Users only configure which model each tier maps to per provider.
@@ -17,62 +19,69 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { CONFIG_DIR } from './account-manager.js';
+import { TIERS, TIER_INFO } from './model-tiers.js';
 import { presetTierMappings, presetStaticModels, PRESET_BY_ID } from './providers/provider-presets.js';
 
 const MAPPINGS_FILE = join(CONFIG_DIR, 'model-mappings.json');
 
 // ─── Tier definitions ───────────────────────────────────────────────────────
+// Single source of truth lives in model-tiers.js (shared with provider-presets).
 
-const TIERS = ['flagship', 'standard', 'fast', 'reasoning'];
-
-const TIER_INFO = {
-    flagship:  { label: 'Flagship',  description: 'Most capable, highest quality' },
-    standard:  { label: 'Standard',  description: 'Daily workhorse, balanced' },
-    fast:      { label: 'Fast',      description: 'Quick and low cost' },
-    reasoning: { label: 'Reasoning', description: 'Deep thinking and analysis' },
-};
+export { TIERS };
 
 // ─── Default provider tier mappings ─────────────────────────────────────────
 
 const DEFAULT_PROVIDER_MAPPINGS = {
     gemini: {
+        fable:     'gemini-3.1-pro-preview',
         flagship:  'gemini-3.1-pro-preview',
         standard:  'gemini-3-flash-preview',
         fast:      'gemini-3.1-flash-lite-preview',
         reasoning: 'gemini-3.1-pro-preview',
+        default:   'gemini-3-flash-preview',
     },
     openai: {
+        fable:     'gpt-5.4',
         flagship:  'gpt-5.4',
         standard:  'gpt-5.4-mini',
         fast:      'gpt-5.4-nano',
         reasoning: 'o4-mini',
+        default:   'gpt-5.4-mini',
     },
     anthropic: {
+        fable:     'claude-opus-4-6',
         flagship:  'claude-opus-4-6',
         standard:  'claude-sonnet-4-6',
         fast:      'claude-haiku-4-5',
         reasoning: 'claude-opus-4-6',
+        default:   'claude-sonnet-4-6',
     },
     'azure-openai': {
+        fable:     'gpt-5.4',
         flagship:  'gpt-5.4',
         standard:  'gpt-5.4-mini',
         fast:      'gpt-5.4-nano',
         reasoning: 'o4-mini',
+        default:   'gpt-5.4-mini',
     },
     'vertex-ai': {
+        fable:     'claude-opus-4-6',
         flagship:  'claude-opus-4-6',
         standard:  'claude-sonnet-4-6',
         fast:      'claude-haiku-4-5',
         reasoning: 'claude-opus-4-6',
+        default:   'claude-sonnet-4-6',
     },
     deepseek: {
         // DeepSeek v4 became the canonical model family on 2026-04-24.
         // Keep reasoning on flash by default because v4 models already support
         // thinking mode toggles through request parameters.
+        fable:     'deepseek-v4-pro',
         flagship:  'deepseek-v4-pro',
         standard:  'deepseek-v4-flash',
         fast:      'deepseek-v4-flash',
         reasoning: 'deepseek-v4-flash',
+        default:   'deepseek-v4-flash',
     },
 };
 
@@ -135,6 +144,9 @@ export function recognizeTier(model) {
     if (/[-_]mini|^mini/.test(m)) return 'fast';
     if (m.includes('haiku')) return 'fast';
 
+    // Claude Code 5.x "fable" tier — above flagship, check before flagship keywords
+    if (m.includes('fable')) return 'fable';
+
     // Flagship models
     if (m.includes('opus')) return 'flagship';
     if (m.includes('pro') && !m.includes('oprox')) return 'flagship';
@@ -160,7 +172,9 @@ export function recognizeTier(model) {
     if (m.startsWith('gemini-')) return 'standard';
     if (m.startsWith('claude-')) return 'standard';
 
-    return 'standard';
+    // Anything else matches no recognized tier → the 'default' fallback slot
+    // (resolves via providerMap.default, which mirrors standard unless customized).
+    return 'default';
 }
 
 // ─── Config persistence ─────────────────────────────────────────────────────
@@ -368,6 +382,9 @@ export function autoUpdateMappings(providerType, tierMap) {
 
     let updated = false;
     for (const tier of TIERS) {
+        // 'default' is the fallback slot — never auto-filled from discovery,
+        // so unclassified models don't overwrite the user's intent.
+        if (tier === 'default') continue;
         if (!tierMap[tier]) continue;
         // Only auto-update if the current value is the hardcoded default
         // (user hasn't manually changed it)

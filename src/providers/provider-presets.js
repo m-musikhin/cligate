@@ -29,7 +29,8 @@
  *   keyHint               string? placeholder shown in the add-key form
  *   providerClass         string? custom class id (omit → generic OpenAICompatibleProvider)
  *   models                array?  known model ids (UI dropdown + tier auto-fill)
- *   tiers                 object? { flagship, standard, fast, reasoning } model mapping
+ *   tiers                 object? { fable, flagship, reasoning, standard, fast, default } model mapping
+ *                                 (fable/default optional — filled from flagship/standard at merge time)
  *   pricing               object? { <model>: { input, output, cacheRead?, cacheWrite? } } USD / 1M tokens
  *   nativeModelPrefixes   array?  model ids starting with any prefix are passed through (no tier remap)
  *   passthroughModelMatch string? if a model id includes this substring, pass it through (e.g. '/')
@@ -40,6 +41,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { CONFIG_DIR } from '../account-manager.js';
+import { TIERS } from '../model-tiers.js';
 
 export const PROVIDER_PRESETS = [
   {
@@ -284,7 +286,7 @@ export const PROVIDER_PRESETS = [
 const USER_PRESETS_FILE = join(CONFIG_DIR, 'provider-presets.json');
 const PRESET_API_FORMATS = new Set(['openai_chat', 'openai_responses', 'anthropic', 'gemini_native']);
 const PRESET_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
-const PRESET_TIER_KEYS = ['flagship', 'standard', 'fast', 'reasoning'];
+const PRESET_TIER_KEYS = TIERS;
 
 function userPresetProblem(entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -387,9 +389,18 @@ export const presetIdsByFormat = (...formats) =>
 export const presetPricing = () =>
   Object.fromEntries(PROVIDER_PRESETS.filter((p) => p.pricing).map((p) => [p.id, p.pricing]));
 
-/** { id: tierMap } for presets that declare tier mappings. */
+/**
+ * { id: tierMap } for presets that declare tier mappings.
+ * Presets may declare only the classic tiers; the fable/default slots are
+ * derived (fable ← flagship, default ← standard) so every merged provider map
+ * covers the full tier set, mirroring the built-in DEFAULT_PROVIDER_MAPPINGS.
+ */
 export const presetTierMappings = () =>
-  Object.fromEntries(PROVIDER_PRESETS.filter((p) => p.tiers).map((p) => [p.id, p.tiers]));
+  Object.fromEntries(PROVIDER_PRESETS.filter((p) => p.tiers).map((p) => [p.id, {
+    ...(p.tiers.flagship !== undefined ? { fable: p.tiers.flagship } : {}),
+    ...p.tiers,
+    ...(p.tiers.standard !== undefined ? { default: p.tiers.standard } : {}),
+  }]));
 
 /** { id: [modelId] } for presets that declare a model list. */
 export const presetStaticModels = () =>

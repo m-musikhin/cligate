@@ -19,6 +19,7 @@ import { getCredentialsForAccount } from './middleware/credentials.js';
 import { fetchModels } from './model-api.js';
 import { getAllProviders } from './api-key-manager.js';
 import { recognizeTier, refreshProviderModels, autoUpdateMappings } from './model-mapping.js';
+import { TIERS } from './model-tiers.js';
 import { logger } from './utils/logger.js';
 import { getPrimaryLocalRuntime } from './local-runtime-manager.js';
 import { listOllamaModels } from './runtimes/ollama.js';
@@ -285,11 +286,15 @@ export async function discoverModels() {
 
 /**
  * Classify a list of models by tier and pick the best per tier.
+ * The 'default' tier is a user-facing fallback slot — it is never filled from
+ * discovery, so unclassified models don't overwrite the mapping default.
  * @param {Array} models - [{id, name, source}]
- * @returns {{ models: Array, tierMap: { flagship: string, standard: string, fast: string, reasoning: string } }}
+ * @returns {{ models: Array, tierMap: { flagship: string, standard: string, fast: string, reasoning: string, fable?: string } }}
  */
 function classifyAndPick(models) {
-    const byTier = { flagship: [], standard: [], fast: [], reasoning: [] };
+    const byTier = Object.fromEntries(
+        TIERS.filter((tier) => tier !== 'default').map((tier) => [tier, []])
+    );
 
     for (const model of models) {
         const tier = recognizeTier(model.id);
