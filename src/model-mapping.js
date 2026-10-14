@@ -119,9 +119,19 @@ const STATIC_PROVIDER_MODELS = {
 };
 
 // Additively merge declarative preset tier maps + model lists
-// (provider-presets.js). Existing providers are untouched.
-Object.assign(DEFAULT_PROVIDER_MAPPINGS, presetTierMappings());
-Object.assign(STATIC_PROVIDER_MODELS, presetStaticModels());
+// (provider-presets.js). Existing providers are untouched. Re-run after
+// custom-preset changes (reloadUserPresets) — additive-only, so presets
+// removed from the file keep their last merged entries until restart.
+function mergePresetMappings() {
+    Object.assign(DEFAULT_PROVIDER_MAPPINGS, presetTierMappings());
+    Object.assign(STATIC_PROVIDER_MODELS, presetStaticModels());
+}
+mergePresetMappings();
+
+/** Re-merge preset tier maps + model lists after a custom-preset reload. */
+export function refreshPresetMerges() {
+    mergePresetMappings();
+}
 
 // Dynamic model lists populated by model-discovery.js
 const dynamicProviderModels = {};

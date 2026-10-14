@@ -13,7 +13,7 @@ import { GeminiProvider } from './providers/gemini.js';
 import { AzureOpenAIProvider } from './providers/azure-openai.js';
 import { VertexAIProvider } from './providers/vertex-ai.js';
 import { DeepSeekProvider } from './providers/deepseek.js';
-import { PROVIDER_PRESETS, PRESET_BY_ID } from './providers/provider-presets.js';
+import { PROVIDER_PRESETS, PRESET_BY_ID, presetIds } from './providers/provider-presets.js';
 import { makeOpenAICompatibleProvider } from './providers/openai-compatible.js';
 
 const API_KEYS_FILE = join(CONFIG_DIR, 'api-keys.json');
@@ -33,9 +33,13 @@ const PROVIDER_CLASSES = {
 // Additively register declarative presets (provider-presets.js). Presets that
 // name a `providerClass` are left to their bespoke class above; everything else
 // gets the generic OpenAI-compatible class. Never overrides an existing entry.
+// PRESET_CLASS_IDS tracks which entries came from presets so a custom-preset
+// reload can rebuild exactly those classes (they close over the preset object).
+const PRESET_CLASS_IDS = new Set();
 for (const preset of PROVIDER_PRESETS) {
     if (!PROVIDER_CLASSES[preset.id]) {
         PROVIDER_CLASSES[preset.id] = makeOpenAICompatibleProvider(preset);
+        PRESET_CLASS_IDS.add(preset.id);
     }
 }
 
@@ -75,8 +79,16 @@ function getProvider(keyConfig) {
     if (providerInstances.has(keyConfig.id)) {
         return providerInstances.get(keyConfig.id);
     }
-    const ProviderClass = PROVIDER_CLASSES[keyConfig.type];
-    if (!ProviderClass) return null;
+    let ProviderClass = PROVIDER_CLASSES[keyConfig.type];
+    if (!ProviderClass) {
+        // Preset added at runtime via the custom-preset API — build and
+        // register the generic class lazily instead of requiring a restart.
+        const preset = PRESET_BY_ID[keyConfig.type];
+        if (!preset) return null;
+        ProviderClass = makeOpenAICompatibleProvider(preset);
+        PROVIDER_CLASSES[keyConfig.type] = ProviderClass;
+        PRESET_CLASS_IDS.add(keyConfig.type);
+    }
 
     const instance = new ProviderClass(keyConfig);
     providerInstances.set(keyConfig.id, instance);
@@ -90,8 +102,11 @@ function generateId() {
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 export function addApiKey({ type, name, apiKey, baseUrl, deploymentName, apiVersion, projectId, location }) {
-    if (!PROVIDER_CLASSES[type]) {
-        return { success: false, error: `Unknown provider type: ${type}. Supported: ${Object.keys(PROVIDER_CLASSES).join(', ')}` };
+    // PROVIDER_CLASSES covers startup-registered types; PRESET_BY_ID covers
+    // presets added at runtime whose class registers lazily in getProvider.
+    const supported = new Set([...Object.keys(PROVIDER_CLASSES), ...presetIds()]);
+    if (!supported.has(type)) {
+        return { success: false, error: `Unknown provider type: ${type}. Supported: ${[...supported].join(', ')}` };
     }
     if (!apiKey) {
         return { success: false, error: 'API key is required' };
@@ -353,6 +368,26 @@ export function getStats() {
         totalCost: providers.reduce((s, p) => s + p.totalCost, 0),
         byType
     };
+}
+
+/**
+ * Rebuild preset-derived provider classes after a custom-preset reload
+ * (provider-presets.js reloadUserPresets). Class closures bind the preset
+ * object they were built from, so a changed preset needs a fresh class;
+ * cached instances of preset-served types are dropped and rebuilt lazily
+ * from the key records on next use (counters are persisted per request).
+ * Classes whose preset vanished are removed — keys of that type simply
+ * stop resolving, mirroring an unknown provider type.
+ */
+export function refreshPresetProviderClasses() {
+    for (const id of PRESET_CLASS_IDS) {
+        const preset = PRESET_BY_ID[id];
+        if (preset) PROVIDER_CLASSES[id] = makeOpenAICompatibleProvider(preset);
+        else delete PROVIDER_CLASSES[id];
+    }
+    for (const [id, instance] of providerInstances) {
+        if (PRESET_CLASS_IDS.has(instance.type)) providerInstances.delete(id);
+    }
 }
 
 export { API_KEYS_FILE };

@@ -13,8 +13,11 @@ import {
     getApiKeyUsage,
     getStats
 } from '../api-key-manager.js';
-import { presetUiList, userPresetProblem, normalizeUserPreset, isBuiltinPresetId, whitelistedUserPresetFields } from '../providers/provider-presets.js';
+import { presetUiList, userPresetProblem, normalizeUserPreset, isBuiltinPresetId, whitelistedUserPresetFields, reloadUserPresets } from '../providers/provider-presets.js';
 import { upsertUserPreset, removeUserPreset } from '../providers/preset-store.js';
+import { refreshPresetMerges } from '../model-mapping.js';
+import { refreshPresetPricing } from '../pricing-registry.js';
+import { refreshPresetProviderClasses } from '../api-key-manager.js';
 
 export function handleListApiKeys(req, res) {
     const keys = listApiKeys();
@@ -107,9 +110,16 @@ export function handleListProviderPresets(req, res) {
  * ~/.cligate/provider-presets.json. The body is validated with the same
  * rules the loader applies at startup, so an entry accepted here is one the
  * loader will merge; request fields outside the preset schema are dropped.
- * The in-memory preset index is NOT rebuilt yet — a server restart applies
- * the change (the hot-reload pass removes this caveat).
+ * On success the preset is hot-reloaded: preset index, tier mappings, pricing
+ * tables and preset provider classes refresh in place — no restart needed.
  */
+function reloadCustomPresetState() {
+    reloadUserPresets();
+    refreshPresetMerges();
+    refreshPresetPricing();
+    refreshPresetProviderClasses();
+}
+
 export function handleSaveCustomPreset(req, res) {
     const body = req.body || {};
     const entry = normalizeUserPreset({ id: typeof body.id === 'string' ? body.id.trim() : '', ...whitelistedUserPresetFields(body) });
@@ -123,12 +133,15 @@ export function handleSaveCustomPreset(req, res) {
     if (!result.success) {
         return res.status(500).json({ success: false, error: result.error });
     }
-    res.json({ success: true, id: entry.id, replaced: result.replaced, requiresRestart: true });
+    reloadCustomPresetState();
+    res.json({ success: true, id: entry.id, replaced: result.replaced, reloaded: true, presets: presetUiList() });
 }
 
 /**
  * DELETE /api/providers/custom-presets/:id
- * Remove one user-defined preset from the file. Built-ins are protected.
+ * Remove one user-defined preset from the file and hot-reload. Built-ins
+ * are protected; deleting a preset leaves its last-merged tier/pricing
+ * entries in place (additive merge) until a restart rebuilds from defaults.
  */
 export function handleDeleteCustomPreset(req, res) {
     const { id } = req.params;
@@ -141,5 +154,6 @@ export function handleDeleteCustomPreset(req, res) {
         const status = result.error === 'not found' ? 404 : 500;
         return res.status(status).json({ success: false, error: result.error });
     }
-    res.json({ success: true, requiresRestart: true });
+    reloadCustomPresetState();
+    res.json({ success: true, reloaded: true, presets: presetUiList() });
 }

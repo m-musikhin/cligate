@@ -25,6 +25,12 @@ export function createApiKeysPageModule() {
     showEditKeyModal: false,
     editKeyData: { id: '', name: '', type: '', apiKey: '', baseUrl: '', maskedKey: '', deploymentName: '', apiVersion: '', projectId: '', location: '', loading: false },
     editKeyTesting: false,
+    // Custom-provider preset form (POST /api/providers/custom-presets).
+    // tiers holds every tier key so Alpine's bracket x-model stays reactive.
+    showCustomProviderModal: false,
+    customPresetSaving: false,
+    customPresetTiers: ['fable', 'flagship', 'reasoning', 'standard', 'fast', 'default'],
+    customPresetForm: { id: '', label: '', badge: '', baseUrl: '', apiFormat: 'openai_chat', models: '', tiers: {}, nativeModelPrefixes: '', passthroughModelMatch: '', validateModel: '' },
 
     apiKeyStateValue(key) {
       if (key?.enabled === false) return 'disabled';
@@ -221,6 +227,69 @@ export function createApiKeysPageModule() {
             this.refreshApiKeyUsage(key, { silent: true });
           }
         }
+      }
+    },
+
+    // ─── Custom provider preset form ────────────────────────────────────────
+    openCustomProviderModal() {
+      const tiers = {};
+      for (const tier of this.customPresetTiers) tiers[tier] = '';
+      this.customPresetForm = {
+        id: '', label: '', badge: '', baseUrl: '', apiFormat: 'openai_chat',
+        models: '', tiers, nativeModelPrefixes: '', passthroughModelMatch: '', validateModel: '',
+      };
+      this.showCustomProviderModal = true;
+    },
+
+    _csvToList(value) {
+      return String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+    },
+
+    async submitCustomProvider() {
+      const form = this.customPresetForm;
+      if (!form.id.trim()) {
+        this.showToast(this.t('customProviderId') + ' — required', 'error');
+        return;
+      }
+      if (!form.baseUrl.trim()) {
+        this.showToast(this.t('customProviderBaseUrl') + ' — required', 'error');
+        return;
+      }
+      const tiers = {};
+      for (const tier of this.customPresetTiers) {
+        const model = (form.tiers[tier] || '').trim();
+        if (model) tiers[tier] = model;
+      }
+      const body = {
+        id: form.id.trim(),
+        baseUrl: form.baseUrl.trim(),
+        apiFormat: form.apiFormat,
+        models: this._csvToList(form.models),
+        nativeModelPrefixes: this._csvToList(form.nativeModelPrefixes),
+      };
+      if (form.label.trim()) body.label = form.label.trim();
+      if (form.badge.trim()) body.badge = form.badge.trim().toUpperCase();
+      if (Object.keys(tiers).length) body.tiers = tiers;
+      if (form.passthroughModelMatch.trim()) body.passthroughModelMatch = form.passthroughModelMatch.trim();
+      if (form.validateModel.trim()) body.validateModel = form.validateModel.trim();
+
+      this.customPresetSaving = true;
+      const { ok, data } = await this.api('/api/providers/custom-presets', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      });
+      this.customPresetSaving = false;
+      if (ok && data?.success) {
+        this.showToast(this.t('customProviderSaved'), 'success');
+        this.showCustomProviderModal = false;
+        // Presets changed server-side (hot reloaded) — bust the cache and
+        // preselect the new type in the add-key form.
+        this.presetProviders = [];
+        await this.loadProviderPresets();
+        this.newKeyType = body.id;
+        this.loadApiKeys();
+      } else {
+        this.showToast(data?.error || this.t('customProviderSaveFailed'), 'error');
       }
     },
 

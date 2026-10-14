@@ -409,10 +409,31 @@ function loadUserPresets() {
 
 // Built-ins first, user entries after. Ids are unique across the merged list
 // (enforced above), so PRESET_BY_ID keeps first-wins semantics for built-ins.
+// The index object is mutated in place (rebuildPresetsIndex) — reassigning it
+// would break every existing `import { PRESET_BY_ID }` binding.
 const BUILTIN_PRESET_IDS = new Set(PROVIDER_PRESETS.map((p) => p.id));
+export const PRESET_BY_ID = {};
+function rebuildPresetsIndex() {
+  for (const key of Object.keys(PRESET_BY_ID)) delete PRESET_BY_ID[key];
+  for (const preset of PROVIDER_PRESETS) PRESET_BY_ID[preset.id] = preset;
+}
 PROVIDER_PRESETS.push(...loadUserPresets());
+rebuildPresetsIndex();
 
-export const PRESET_BY_ID = Object.fromEntries(PROVIDER_PRESETS.map((p) => [p.id, p]));
+/**
+ * Re-read the user presets file and rebuild the merged preset list in place:
+ * previously merged user presets are dropped, the current file content is
+ * re-validated and re-merged, PRESET_BY_ID is rebuilt. Built-ins always win
+ * id collisions. Callers that derive state from presets (tier mappings,
+ * pricing, provider classes) must run their own refresh afterwards.
+ */
+export function reloadUserPresets() {
+  for (let i = PROVIDER_PRESETS.length - 1; i >= 0; i--) {
+    if (!BUILTIN_PRESET_IDS.has(PROVIDER_PRESETS[i].id)) PROVIDER_PRESETS.splice(i, 1);
+  }
+  PROVIDER_PRESETS.push(...loadUserPresets());
+  rebuildPresetsIndex();
+}
 
 /** All preset provider ids. */
 export const presetIds = () => PROVIDER_PRESETS.map((p) => p.id);
@@ -466,4 +487,5 @@ export default {
   presetTierMappings,
   presetStaticModels,
   presetUiList,
+  reloadUserPresets,
 };

@@ -102,8 +102,17 @@ const DEFAULT_PRICING = {
 
 // Additively merge declarative preset pricing (provider-presets.js). Existing
 // provider tables are preserved; preset entries only fill in their own ids.
-for (const [provider, table] of Object.entries(presetPricing())) {
-    DEFAULT_PRICING[provider] = { ...(DEFAULT_PRICING[provider] || {}), ...table };
+// Re-runnable after custom-preset changes (reloadUserPresets).
+function mergePresetPricing() {
+    for (const [provider, table] of Object.entries(presetPricing())) {
+        DEFAULT_PRICING[provider] = { ...(DEFAULT_PRICING[provider] || {}), ...table };
+    }
+}
+mergePresetPricing();
+
+/** Re-merge preset pricing tables after a custom-preset reload. */
+export function refreshPresetPricing() {
+    mergePresetPricing();
 }
 
 let overrideData = null;

@@ -587,6 +587,99 @@
         </div>
     </div>
 
+    <!-- Custom Provider Preset Modal -->
+    <div x-show="showCustomProviderModal" x-transition class="fixed inset-0 z-50 flex items-center justify-center p-4" style="display: none;">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showCustomProviderModal = false"></div>
+        <div class="relative bg-space-900 border border-space-border rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="font-bold text-lg text-white mb-1" x-text="t('customProviderTitle')"></h3>
+            <p class="text-sm text-gray-400 mb-6" x-text="t('customProviderDesc')"></p>
+
+            <div class="flex flex-col gap-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderId')"></label>
+                        <input type="text" x-model="customPresetForm.id" placeholder="my-provider"
+                            class="input w-full bg-space-800 border-space-border text-white font-mono text-sm">
+                        <p class="text-[10px] text-gray-600 mt-1" x-text="t('customProviderIdHint')"></p>
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderLabel')"></label>
+                        <input type="text" x-model="customPresetForm.label" placeholder="My Provider"
+                            class="input w-full bg-space-800 border-space-border text-white font-mono text-sm">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderBadge')"></label>
+                        <input type="text" x-model="customPresetForm.badge" placeholder="MP"
+                            class="input w-full bg-space-800 border-space-border text-white font-mono text-sm uppercase">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderFormat')"></label>
+                        <select x-model="customPresetForm.apiFormat"
+                            class="w-full h-9 bg-space-800 border border-space-border rounded text-sm font-mono px-3 text-white focus:border-neon-purple focus:outline-none">
+                            <option value="openai_chat">openai_chat</option>
+                            <option value="openai_responses">openai_responses</option>
+                            <option value="anthropic">anthropic</option>
+                            <option value="gemini_native">gemini_native</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderBaseUrl')"></label>
+                    <input type="text" x-model="customPresetForm.baseUrl" placeholder="https://api.example.com/v1"
+                        class="input w-full bg-space-800 border-space-border text-white font-mono text-sm">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderModels')"></label>
+                    <textarea x-model="customPresetForm.models" rows="2" placeholder="model-a, model-b, vendor/model-c"
+                        class="input w-full bg-space-800 border-space-border text-white font-mono text-xs resize-y"></textarea>
+                    <p class="text-[10px] text-gray-600 mt-1" x-text="t('customProviderModelsHint')"></p>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderTiers')"></label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <template x-for="tier in ['fable', 'flagship', 'reasoning', 'standard', 'fast', 'default']" :key="tier">
+                            <div>
+                                <label class="text-[10px] font-mono text-gray-600 mb-1 block" x-text="tier"></label>
+                                <input type="text" x-model="customPresetForm.tiers[tier]"
+                                    class="input w-full bg-space-800 border-space-border text-white font-mono text-xs">
+                            </div>
+                        </template>
+                    </div>
+                    <p class="text-[10px] text-gray-600 mt-1" x-text="t('customProviderTiersHint')"></p>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderPrefixes')"></label>
+                        <input type="text" x-model="customPresetForm.nativeModelPrefixes" placeholder="glm, kimi"
+                            class="input w-full bg-space-800 border-space-border text-white font-mono text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderPassthrough')"></label>
+                        <input type="text" x-model="customPresetForm.passthroughModelMatch" placeholder="/"
+                            class="input w-full bg-space-800 border-space-border text-white font-mono text-sm">
+                        <p class="text-[10px] text-gray-600 mt-1" x-text="t('customProviderPassthroughHint')"></p>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 mb-1 block" x-text="t('customProviderValidateModel')"></label>
+                    <input type="text" x-model="customPresetForm.validateModel" placeholder="free-model-id"
+                        class="input w-full bg-space-800 border-space-border text-white font-mono text-sm">
+                    <p class="text-[10px] text-gray-600 mt-1" x-text="t('customProviderValidateHint')"></p>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-outline btn-sm" @click="showCustomProviderModal = false" x-text="t('cancel')"></button>
+                <button class="btn btn-sm btn-accent-purple"
+                    @click="submitCustomProvider()"
+                    :disabled="customPresetSaving || !customPresetForm.id.trim() || !customPresetForm.baseUrl.trim()"
+                    x-text="t('save')"></button>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit API Key Modal -->
     <div x-show="showEditKeyModal" x-transition class="fixed inset-0 z-50 flex items-center justify-center p-4" style="display: none;">
         <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showEditKeyModal = false"></div>

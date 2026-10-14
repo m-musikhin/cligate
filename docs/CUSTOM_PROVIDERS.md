@@ -28,7 +28,10 @@ custom provider you want):
 ]
 ```
 
-Restart the server. The new type appears in the dashboard's **Add API Key**
+Restart the server **or just save it from the dashboard** (see the custom
+provider form / `POST /api/providers/custom-presets` below) — changes are
+hot-reloaded, no restart needed. The new type appears in the dashboard's
+**Add API Key**
 form; keys you add with it route through the generic OpenAI-compatible
 provider. `nativeModelPrefixes` keeps ids the caller explicitly chose
 (`vendor-x`) from being tier-remapped; everything else (e.g. an incoming
@@ -46,16 +49,38 @@ Same schema as the built-in presets in `src/providers/provider-presets.js`:
 | `apiFormat`          | no       | `openai_chat` (default) \| `openai_responses` \| `anthropic` \| `gemini_native`. `openai_chat` vendors serve all three gateway surfaces (chat, Codex Responses fallback, Claude Code bridge). |
 | `website`, `keyHint` | no       | Console link and key placeholder shown in the add-key form. |
 | `models`             | no       | Static model ids for UI dropdowns and tier auto-fill (supplemented by discovery when the vendor serves `/models`). |
-| `tiers`              | no       | `{ flagship, standard, fast, reasoning }` → model id. Unknown tier keys are rejected. |
+| `tiers`              | no       | `{ fable, flagship, standard, fast, reasoning, default }` → model id. Unknown tier keys are rejected. Unset `fable` falls back to `flagship`, unset `default` to `standard`. |
 | `nativeModelPrefixes`| no       | Model ids starting with any prefix pass through without tier remap. |
 | `passthroughModelMatch` | no    | Model ids containing this substring pass through verbatim (e.g. `"/"` for `vendor/model` slugs). |
 | `pricing`            | no       | `{ "<model>": { input, output, cacheRead?, cacheWrite? } }` in USD / 1M tokens. |
 | `validateModel`      | no       | For vendors without `GET /models` (e.g. Zhipu): "test key" probes a 1-token chat request with this model instead. |
 | `usage`              | no       | Subscription/quota endpoint shown in the API Keys limits column: `{ format: "cline-plan" \| "ollama-balance", baseUrl?, path? }`. `baseUrl` defaults to the preset `baseUrl` and `path` to the format's default (`/users/me/plan/usage-limits` / `/api/balance`). Snapshots are cached for 5 minutes. |
 
+## Dashboard form and REST API
+
+The API Keys page has a **Custom provider** button next to **Add API Key** —
+a form over the same schema (models and prefixes are comma-separated, unset
+tiers stay empty). Saving it upserts by `id` and hot-reloads the preset
+state: the preset index, tier mappings, pricing tables, and preset provider
+classes refresh in place; cached provider instances are rebuilt lazily, so
+already-configured keys pick up a changed preset without a restart.
+
+REST equivalents (used by the form):
+
+- `POST /api/providers/custom-presets` — upsert one preset. The body is
+  validated with the same rules the loader applies at startup; unknown fields
+  are dropped. Response: `{ success, id, replaced, reloaded, presets }`.
+- `DELETE /api/providers/custom-presets/:id` — remove one user preset
+  (built-ins are rejected with 400). Response: `{ success, reloaded, presets }`.
+
+Additive-merge caveat: deleting a preset removes it from the preset list and
+its provider class, but tier/pricing entries it merged earlier stay in place
+until a restart rebuilds them from defaults.
+
 ## Validation and error handling
 
-The loader runs at server start. A bad file never blocks startup — each
+The same rules apply whether the entry comes from the file at startup or
+from the form/endpoint at runtime. A bad file never blocks startup — each
 invalid entry is skipped with a console warning explaining why:
 
 - collides with a built-in id → skipped (built-ins always win),

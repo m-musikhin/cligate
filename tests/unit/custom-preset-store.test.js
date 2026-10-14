@@ -4,6 +4,8 @@ import '../test-env.js';
  * custom-preset API (POST/DELETE /api/providers/custom-presets). Covers raw
  * file round-trips, the request whitelist, loader-parity validation, and
  * built-in protection. No server required — handlers run against mock req/res.
+ * Success responses prove the hot-reload orchestration ran: the handler
+ * re-merges preset state in memory and answers with the fresh preset list.
  */
 
 import test from 'node:test';
@@ -98,7 +100,9 @@ test('handleSaveCustomPreset: 400 on loader-rejected entries, whitelist on write
   assert.equal(res._status, 200);
   assert.equal(res._body.success, true);
   assert.equal(res._body.replaced, false);
-  assert.equal(res._body.requiresRestart, true);
+  assert.equal(res._body.reloaded, true, 'handler hot-reloads preset state after the write');
+  assert.ok(Array.isArray(res._body.presets), 'response carries the post-reload preset list');
+  assert.ok(res._body.presets.some((p) => p.id === 'my-vendor'), 'saved preset is merged in memory');
 
   const stored = readUserPresetsFile().find((e) => e.id === 'my-vendor');
   assert.equal(stored.baseUrl, VALID.baseUrl);
@@ -133,7 +137,8 @@ test('handleDeleteCustomPreset: built-ins 400, missing 404, removal works', () =
   handleDeleteCustomPreset({ params: { id: 'my-vendor' } }, res);
   assert.equal(res._status, 200);
   assert.equal(res._body.success, true);
-  assert.equal(res._body.requiresRestart, true);
+  assert.equal(res._body.reloaded, true, 'delete also hot-reloads');
+  assert.ok(!res._body.presets.some((p) => p.id === 'my-vendor'), 'deleted preset leaves the in-memory list');
   assert.deepEqual(readUserPresetsFile(), []);
 });
 
