@@ -18,6 +18,7 @@ import { sendClaudeMessageWithMeta, sendClaudeStream, mapToClaudeModel, extractC
 import { listApiKeys, getProviderById, recordUsage, recordError, recordRateLimit } from '../api-key-manager.js';
 import { resolveModel } from '../model-mapping.js';
 import { getProviderModelOptions, normalizeProviderType } from '../model-options.js';
+import { getDiscoveredSourceModels, discoverModelsForSource } from '../model-discovery.js';
 import { logger } from '../utils/logger.js';
 // Legacy ordinary-chat assistant compatibility path only.
 // /cligate supervisor logic belongs to assistant-core + assistant-agent.
@@ -643,6 +644,10 @@ function saveChatUiOutboundDelivery(conversation, {
 }
 
 export async function handleListChatSources(_req, res) {
+  // Per-source discovered models (when available) instead of one merged list
+  // per provider type — the UI then shows what each source actually serves.
+  const sourceModels = (sourceId) => getDiscoveredSourceModels(sourceId);
+
   const chatgptSources = listAccounts().accounts
     .filter((account) => account.enabled !== false)
     .map((account) => ({
@@ -655,7 +660,7 @@ export async function handleListChatSources(_req, res) {
         planType: account.planType,
         isActive: account.isActive,
         providerType: 'openai',
-        models: getProviderModelOptions('openai')
+        models: sourceModels(`chatgpt:${account.email}`) || getProviderModelOptions('openai')
       }
     }));
 
@@ -672,7 +677,7 @@ export async function handleListChatSources(_req, res) {
         subscriptionType: account.subscriptionType || 'free',
         isActive: account.email === claudeData.activeAccount,
         providerType: 'anthropic',
-        models: getProviderModelOptions('anthropic')
+        models: sourceModels(`claude:${account.email}`) || getProviderModelOptions('anthropic')
       }
     }));
 
@@ -687,7 +692,7 @@ export async function handleListChatSources(_req, res) {
         keyId: key.id,
         providerType: normalizeProviderType(key.type),
         isAvailable: key.isAvailable,
-        models: getProviderModelOptions(key.type)
+        models: sourceModels(`apikey:${key.id}`) || getProviderModelOptions(key.type)
       }
     }));
 
@@ -713,6 +718,27 @@ export async function handleListChatSources(_req, res) {
   res.json({
     sources: [...chatgptSources, ...claudeSources, ...antigravitySources, ...apiKeySources]
   });
+}
+
+/**
+ * GET /api/chat/sources/models?sourceId=...
+ * On-demand model discovery for a single chat source. Cache-first: a fresh
+ * entry (30 min TTL) answers instantly; a recent failure serves the stale
+ * list or an empty one until the negative cache expires.
+ */
+export async function handleGetChatSourceModels(req, res) {
+  const sourceId = typeof req.query?.sourceId === 'string' ? req.query.sourceId.trim() : '';
+  if (!sourceId) {
+    return res.status(400).json({ success: false, error: 'sourceId is required' });
+  }
+
+  try {
+    const models = await discoverModelsForSource(sourceId);
+    return res.json({ success: true, sourceId, models });
+  } catch (error) {
+    logger.warn(`[ChatUI] Source models discovery failed for ${sourceId}: ${error.message}`);
+    return res.status(500).json({ success: false, error: error.message });
+  }
 }
 
 export async function handleChatWithSource(req, res) {

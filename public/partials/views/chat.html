@@ -40,7 +40,7 @@
                             <div class="chat-control-grid flex flex-wrap items-end gap-3">
                                 <div class="chat-control-field min-w-0 chat-control-fixed" style="flex:0 0 200px;">
                                     <label class="chat-control-label text-[11px] font-mono text-gray-400 uppercase tracking-wider" x-text="t('chatSource')"></label>
-                                    <select x-model="chatSourceId" @change="ensureChatModelMatchesSource(); syncActiveChatSession()"
+                                    <select x-model="chatSourceId" @change="loadChatSourceModels(); ensureChatModelMatchesSource(); syncActiveChatSession()"
                                         class="chat-control-input input mt-1.5 h-10 bg-space-800 border-space-border text-white font-mono text-xs">
                                         <template x-for="source in chatSources" :key="source.id">
                                             <option :value="source.id" x-text="source.label"></option>

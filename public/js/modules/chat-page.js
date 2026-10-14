@@ -422,6 +422,16 @@ export function createChatPageModule() {
       return this.chatSources.find((source) => source.id === sourceId) || null;
     },
 
+    async loadChatSourceModels(sourceId = this.chatSourceId) {
+      // Refresh the selected source's model list from per-source discovery.
+      if (!sourceId || !this.chatSourceById(sourceId)) return;
+      const { ok, data } = await this.api(`/api/chat/sources/models?sourceId=${encodeURIComponent(sourceId)}`);
+      if (!ok || !Array.isArray(data?.models)) return;
+      const source = this.chatSourceById(sourceId);
+      if (source) source.meta.models = data.models;
+      this.ensureChatModelMatchesSource();
+    },
+
     inferProviderTypeForModel(modelId) {
       const value = String(modelId || '').trim().toLowerCase();
       if (!value) return null;

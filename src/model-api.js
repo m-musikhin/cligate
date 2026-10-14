@@ -6,21 +6,19 @@
 const CHATGPT_API_BASE = 'https://chatgpt.com/backend-api';
 const CLIENT_VERSION = '0.100.0';
 
-const MODEL_CACHE = {
-    models: null,
-    lastFetched: 0,
-    ttlMs: 5 * 60 * 1000
-};
+// Cache is keyed by ChatGPT account id — two accounts must never see each
+// other's model list (accounts on different plans expose different models).
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+const MODEL_CACHE = new Map(); // accountId -> { models, lastFetched }
 
 export async function fetchModels(accessToken, accountId) {
-    const now = Date.now();
-    
-    if (MODEL_CACHE.models && (now - MODEL_CACHE.lastFetched) < MODEL_CACHE.ttlMs) {
-        return MODEL_CACHE.models;
+    const cached = MODEL_CACHE.get(accountId);
+    if (cached && (Date.now() - cached.lastFetched) < MODEL_CACHE_TTL_MS) {
+        return cached.models;
     }
-    
+
     const url = `${CHATGPT_API_BASE}/codex/models?client_version=${CLIENT_VERSION}`;
-    
+
     const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -29,14 +27,14 @@ export async function fetchModels(accessToken, accountId) {
             'Accept': 'application/json'
         }
     });
-    
+
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to fetch models: ${response.status} - ${errorText}`);
     }
-    
+
     const data = await response.json();
-    
+
     const models = (data.models || []).map(m => ({
         id: m.slug,
         name: m.display_name || m.slug,
@@ -46,10 +44,9 @@ export async function fetchModels(accessToken, accountId) {
         supportedInApi: m.supported_in_api || false,
         visibility: m.visibility || 'list'
     }));
-    
-    MODEL_CACHE.models = models;
-    MODEL_CACHE.lastFetched = now;
-    
+
+    MODEL_CACHE.set(accountId, { models, lastFetched: Date.now() });
+
     return models;
 }
 
@@ -174,9 +171,12 @@ export async function getModelsAndQuota(accessToken, accountId) {
     }
 }
 
-export function clearModelCache() {
-    MODEL_CACHE.models = null;
-    MODEL_CACHE.lastFetched = 0;
+export function clearModelCache(accountId) {
+    if (accountId) {
+        MODEL_CACHE.delete(accountId);
+    } else {
+        MODEL_CACHE.clear();
+    }
 }
 
 export default {

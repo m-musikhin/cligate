@@ -17,7 +17,7 @@
 import { getActiveAccount, listAccounts } from './account-manager.js';
 import { getCredentialsForAccount } from './middleware/credentials.js';
 import { fetchModels } from './model-api.js';
-import { getAllProviders } from './api-key-manager.js';
+import { getAllProviders, getProviderById, listApiKeys } from './api-key-manager.js';
 import { recognizeTier, refreshProviderModels, autoUpdateMappings } from './model-mapping.js';
 import { TIERS } from './model-tiers.js';
 import { logger } from './utils/logger.js';
@@ -214,6 +214,115 @@ export function resetLocalRuntimeProbe() {
     resetLogSamplerKey('model-discovery:local-runtime:skipped');
 }
 
+// ─── Per-source discovery (chat UI) ─────────────────────────────────────────
+
+// Chat sources (chatgpt:<email>, claude:<email>, apikey:<id>, antigravity:<email>)
+// get their own model list so the UI shows what each source actually serves
+// instead of one merged list per provider type.
+const SOURCE_NEGATIVE_TTL_MS = 10 * 60 * 1000; // remember failures for 10 min
+
+const perSourceCache = new Map(); // sourceKey -> { models: [...], updatedAt, error, retryAfter }
+
+function normalizeSourceKey(sourceId) {
+    const key = String(sourceId || '').trim();
+    return key || null;
+}
+
+function setPerSourceCache(key, { models = null, error = null } = {}) {
+    perSourceCache.set(key, {
+        models,
+        error,
+        updatedAt: Date.now(),
+        retryAfter: error ? Date.now() + SOURCE_NEGATIVE_TTL_MS : 0,
+    });
+}
+
+/**
+ * Resolve models for a single chat source, from cache only.
+ * @param {string} sourceId - e.g. 'chatgpt:x@y.z', 'apikey:abc'
+ */
+export function getDiscoveredSourceModels(sourceId) {
+    const key = normalizeSourceKey(sourceId);
+    if (!key) return null;
+    const entry = perSourceCache.get(key);
+    return entry?.models?.length ? entry.models.map(m => m.id) : null;
+}
+
+/**
+ * Discover models for one chat source on demand.
+ * Fresh cache wins; a recent failure blocks retry for 10 minutes
+ * (negative cache) so N open tabs don't hammer the provider.
+ *
+ * @param {string} sourceId
+ * @returns {Promise<string[]>} model id list (possibly empty)
+ */
+export async function discoverModelsForSource(sourceId) {
+    const key = normalizeSourceKey(sourceId);
+    if (!key) return [];
+
+    const entry = perSourceCache.get(key);
+    const now = Date.now();
+    if (entry?.models?.length && (now - entry.updatedAt) < CACHE_TTL_MS) {
+        return entry.models.map(m => m.id);
+    }
+    if (entry?.error && now < entry.retryAfter) {
+        return entry.models?.length ? entry.models.map(m => m.id) : [];
+    }
+
+    try {
+        let models = [];
+        if (sourceId.startsWith('chatgpt:')) {
+            const email = sourceId.slice('chatgpt:'.length);
+            const creds = await getCredentialsForAccount(email);
+            if (!creds) throw new Error(`ChatGPT account not available: ${email}`);
+            models = await fetchModels(creds.accessToken, creds.accountId);
+        } else if (sourceId.startsWith('apikey:')) {
+            const keyId = sourceId.slice('apikey:'.length);
+            const provider = getProviderById(keyId);
+            if (!provider) throw new Error(`API key not found: ${keyId}`);
+            if (typeof provider.listModels !== 'function') throw new Error(`Provider ${provider.type} does not expose a model list`);
+            models = await provider.listModels();
+        } else if (sourceId.startsWith('claude:')) {
+            // Claude OAuth accounts have no per-account list endpoint — the
+            // tier-mapped provider list is the best available answer.
+            models = [];
+        } else {
+            throw new Error(`Unsupported source type: ${sourceId}`);
+        }
+
+        const normalized = (Array.isArray(models) ? models : [])
+            .map(m => (typeof m === 'string' ? { id: m } : m))
+            .filter(m => m.id)
+            .map(m => ({ id: m.id, name: m.name || m.id, source: sourceId }));
+        setPerSourceCache(key, { models: normalized });
+        return normalized.map(m => m.id);
+    } catch (err) {
+        setPerSourceCache(key, { error: err.message, models: entry?.models || [] });
+        logger.warn(`[ModelDiscovery] Per-source discovery failed for ${sourceId}: ${err.message}`);
+        return entry?.models?.length ? entry.models.map(m => m.id) : [];
+    }
+}
+
+/**
+ * Sequentially refresh every known chat source's per-source cache.
+ * Sources with fresh entries are skipped; failures go to the negative cache
+ * and are retried on the next cycle.
+ */
+async function warmPerSourceCache() {
+    const sourceIds = [
+        ...listAccounts().accounts.filter((a) => a.enabled !== false).map((a) => `chatgpt:${a.email}`),
+        ...listApiKeys().filter((k) => k.enabled !== false).map((k) => `apikey:${k.id}`),
+    ];
+
+    for (const sourceId of sourceIds) {
+        const entry = perSourceCache.get(sourceId);
+        const now = Date.now();
+        if (entry?.models?.length && (now - entry.updatedAt) < CACHE_TTL_MS) continue;
+        if (entry?.error && now < entry.retryAfter) continue;
+        await discoverModelsForSource(sourceId);
+    }
+}
+
 // ─── Main discovery flow ─────────────────────────────────────────────────────
 
 /**
@@ -274,6 +383,10 @@ export async function discoverModels() {
             .map(([type, data]) => `${type}:${data.models.length}`)
             .join(', ');
         logger.info(`[ModelDiscovery] Discovery complete: ${summary}`);
+
+        // Warm the per-source cache in the background (sequential — one
+        // provider request at a time, never parallel bursts).
+        await warmPerSourceCache();
 
     } catch (err) {
         logger.error(`[ModelDiscovery] Discovery failed: ${err.message}`);
@@ -377,6 +490,8 @@ export default {
     getDiscoveredModels,
     getDiscoveredProviderModels,
     getDiscoveredTierMap,
+    getDiscoveredSourceModels,
+    discoverModelsForSource,
     startModelDiscovery,
     stopModelDiscovery,
     resetLocalRuntimeProbe

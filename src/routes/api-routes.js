@@ -39,7 +39,8 @@ import {
   handleStreamChatWithSource,
   handleConfirmAssistantToolAction,
   handleGetChatAgentSession,
-  handleRouteChatAgentMessage
+  handleRouteChatAgentMessage,
+  handleGetChatSourceModels
 } from './chat-ui-route.js';
 import { handleGetRuntimeCredentials, handleGetRoutingDecisions, handleGetRoutingPreview, handleGetLocalRoutingStatus } from './runtime-route.js';
 import { handleGetLocalRuntimeStatus, handleSetLocalRuntimeEnabled, handleUpdateLocalRuntime, handleCheckLocalRuntime, handleRefreshLocalRuntimeModels } from './local-runtimes-route.js';
@@ -617,6 +618,7 @@ export function registerApiRoutes(app, { port }) {
 
   // Chat UI
   app.get('/api/chat/sources', handleListChatSources);
+  app.get('/api/chat/sources/models', handleGetChatSourceModels);
   app.post('/api/chat/complete', handleChatWithSource);
   app.post('/api/chat/stream', handleStreamChatWithSource);
   app.get('/api/chat/sessions/:sessionId', handleGetChatAgentSession);

@@ -3,7 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { saveAccounts as saveAntigravityAccounts } from '../../src/antigravity-account-manager.js';
-import { handleListChatSources } from '../../src/routes/chat-ui-route.js';
+import { handleListChatSources, handleGetChatSourceModels } from '../../src/routes/chat-ui-route.js';
+import { addApiKey, removeApiKey } from '../../src/api-key-manager.js';
+import { discoverModelsForSource } from '../../src/model-discovery.js';
 
 function mockRes() {
   return {
@@ -43,4 +45,53 @@ test('handleListChatSources includes Antigravity accounts in source selector', a
   assert.equal(antigravity.kind, 'antigravity-account');
   assert.equal(antigravity.meta.providerType, 'gemini');
   assert.deepEqual(antigravity.meta.models, ['antigravity/gemini-2.5-pro']);
+});
+
+test('handleListChatSources serves per-source discovered models for apikey sources', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/models')) {
+      return { ok: true, json: async () => ({ data: [{ id: 'per-source-model-1' }] }) };
+    }
+    throw new Error('unexpected fetch');
+  };
+  const { id } = addApiKey({ type: 'openrouter', name: 'per-source', apiKey: 'sk-test' });
+  try {
+    await discoverModelsForSource(`apikey:${id}`);
+    const res = mockRes();
+    await handleListChatSources({}, res);
+
+    assert.equal(res._status, 200);
+    const source = res._body.sources.find((s) => s.id === `apikey:${id}`);
+    assert.ok(source, 'apikey source present');
+    assert.deepEqual(source.meta.models, ['per-source-model-1'], 'per-source list wins over the provider-type list');
+  } finally {
+    removeApiKey(id);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('handleGetChatSourceModels: 400 without sourceId, discovery result with it', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/models')) {
+      return { ok: true, json: async () => ({ data: [{ id: 'on-demand-model-1' }] }) };
+    }
+    throw new Error('unexpected fetch');
+  };
+  const { id } = addApiKey({ type: 'openrouter', name: 'on-demand', apiKey: 'sk-test' });
+  try {
+    const missing = mockRes();
+    await handleGetChatSourceModels({ query: {} }, missing);
+    assert.equal(missing._status, 400);
+
+    const res = mockRes();
+    await handleGetChatSourceModels({ query: { sourceId: `apikey:${id}` } }, res);
+    assert.equal(res._status, 200);
+    assert.equal(res._body.success, true);
+    assert.deepEqual(res._body.models, ['on-demand-model-1']);
+  } finally {
+    removeApiKey(id);
+    globalThis.fetch = originalFetch;
+  }
 });
