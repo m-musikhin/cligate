@@ -53,9 +53,11 @@ function installFetchMock() {
     if (String(url).includes('/api/balance')) {
       return {
         ok: true,
+        // Real Ollama Cloud response shape (2026-10): allowance_usd is the
+        // full monthly grant (not remaining), purchased is an object bucket.
         json: async () => ({
-          included: { balance_usd: 2.5, allowance_usd: 0.5, period: 'monthly' },
-          purchased: [{ balance_usd: 1.25 }],
+          included: { balance_usd: 0.46, allowance_usd: 60, period: { from: '2026-09-20T12:06:43Z', until: '2026-10-20T12:06:43Z' } },
+          purchased: { balance_usd: 20 },
         }),
       };
     }
@@ -92,14 +94,15 @@ test('clinepass fetchUsage normalizes plan windows', async () => {
   }
 });
 
-test('ollama-cloud fetchUsage sums included balance + purchased credits', async () => {
+test('ollama-cloud fetchUsage sums monthly remainder + purchased credits', async () => {
   const { id } = addApiKey({ type: 'ollama-cloud', name: 'oc', apiKey: 'oc-key' });
   try {
     const usage = await getProviderById(id).fetchUsage();
     assert.equal(usage.kind, 'balance');
-    assert.equal(usage.balance.remaining, 4.25);
+    // allowance_usd (the full $60 grant) must NOT be counted as remaining.
+    assert.equal(usage.balance.remaining, 20.46);
     assert.equal(usage.balance.unit, 'USD');
-    assert.equal(usage.balance.period, 'monthly');
+    assert.equal(usage.balance.period, '2026-10-20T12:06:43Z');
     assert.deepEqual(usage.windows, []);
     assert.ok(FETCH_CALLS[0].includes('ollama.com/api/balance'), 'balance endpoint is not under /v1');
   } finally {
@@ -159,7 +162,7 @@ test('handleGetApiKeyUsage: 404 for unknown key, snapshot payload for a usage ke
     assert.equal(res._status, 200);
     assert.equal(res._body.success, true);
     assert.equal(res._body.usage.kind, 'balance');
-    assert.equal(res._body.usage.balance.remaining, 4.25);
+    assert.equal(res._body.usage.balance.remaining, 20.46);
   } finally {
     removeApiKey(id);
   }

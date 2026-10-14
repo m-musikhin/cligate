@@ -83,29 +83,38 @@ function parseClinePlanUsage(data) {
   return { kind: 'windows', windows, balance: null };
 }
 
-// Ollama Cloud balance: { included: { balance_usd, allowance_usd, period },
-// purchased: [...] }. Sum whatever numeric amounts are present so future
-// response additions (extra credit buckets) still add up.
+// Ollama Cloud balance. Real response (2026-10):
+//   { included: { balance_usd: 0.46, allowance_usd: 60,
+//                 period: { from, until } },
+//     purchased: { balance_usd: 20 } }
+// included.balance_usd is the remaining monthly credit (allowance_usd is the
+// full grant — NOT remaining), purchased holds added one-time credits and may
+// be an object or an array of buckets. Remaining = monthly remainder + all
+// purchased amounts.
 function parseOllamaBalanceUsage(data) {
   const included = data?.included ?? data; // tolerate a flat body
-  const amounts = [included?.balance_usd, included?.allowance_usd]
+  const amounts = [included?.balance_usd]
     .map(Number)
     .filter(Number.isFinite);
-  if (Array.isArray(data?.purchased)) {
-    amounts.push(...data.purchased
-      .map((p) => Number(p?.balance_usd ?? p?.amount_usd ?? p?.usd))
-      .filter(Number.isFinite));
-  }
+  const purchased = data?.purchased;
+  const buckets = Array.isArray(purchased) ? purchased : purchased ? [purchased] : [];
+  amounts.push(...buckets
+    .map((p) => Number(p?.balance_usd ?? p?.amount_usd ?? p?.usd))
+    .filter(Number.isFinite));
   if (amounts.length === 0) {
     throw new Error('balance response contained no numeric balance');
   }
+  // period is { from, until } — summarize by its refill/expiry date.
+  const period = typeof included?.period === 'string'
+    ? included.period
+    : included?.period?.until || null;
   return {
     kind: 'balance',
     windows: [],
     balance: {
       remaining: amounts.reduce((sum, n) => sum + n, 0),
       unit: 'USD',
-      period: typeof included?.period === 'string' ? included.period : null,
+      period,
     },
   };
 }
