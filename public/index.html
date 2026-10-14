@@ -7,9 +7,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CliGate</title>
     <link rel="icon" href="/favicon-dark.ico">
-    <script type="module" src="/js/app.js?v=20260527-mcp-layout-1"></script>
+    <script type="module" src="/js/app.js?v=20261014-usage-fixes-1"></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-    <link rel="stylesheet" href="/css/style.css?v=20260612-modal-fit-1">
+    <link rel="stylesheet" href="/css/style.css?v=20261014-usage-fixes-1">
 </head>
 
 <body class="bg-space-950 text-gray-300 font-sans antialiased min-h-screen selection:bg-neon-purple selection:text-white"
@@ -977,7 +977,11 @@
                 <div class="text-xs text-gray-600" x-text="t('apiKeyUsageStale')"></div>
             </template>
 
-            <div class="mt-6 flex justify-end">
+            <div class="mt-6 flex justify-end gap-2">
+                <button class="btn btn-sm bg-space-800 hover:bg-space-700 border border-space-border text-gray-300"
+                    @click="selectedUsageKey() && refreshApiKeyUsage(selectedUsageKey())"
+                    :disabled="!selectedUsageKey() || apiKeyUsageLoading(selectedUsageKey())"
+                    x-text="selectedUsageKey() && apiKeyUsageLoading(selectedUsageKey()) ? t('refreshing') : t('refresh')"></button>
                 <button class="btn btn-outline btn-sm text-gray-400" @click="showKeyUsageModal = false" x-text="t('close')"></button>
             </div>
         </div>
@@ -994,37 +998,75 @@
             </h3>
             <p class="text-sm text-gray-500 font-mono mb-4" x-text="selectedAccount?.email"></p>
 
-            <div class="space-y-3 max-h-[60vh] overflow-y-auto" x-show="getRemainingPercentage(selectedAccount) !== null">
-                <div class="p-3 bg-space-800/50 border border-space-border/30 rounded-lg">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-sm font-semibold text-gray-200" x-text="t('usage')"></span>
-                        <template x-if="!isQuotaExhausted(selectedAccount)">
-                            <span class="text-xs font-mono"
-                                :class="quotaTextClass(selectedAccount)"
-                                x-text="quotaLabel(selectedAccount) + ' ' + t('remaining')"></span>
-                        </template>
-                        <template x-if="isQuotaExhausted(selectedAccount)">
-                            <span class="text-[10px] font-bold uppercase text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/30" x-text="t('quotaExhausted')"></span>
-                        </template>
-                    </div>
-                    <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
-                        <div class="h-full rounded-full transition-all"
-                            :class="quotaBarClass(selectedAccount)"
-                            :style="`width: ${getRemainingPercentage(selectedAccount)}%`"></div>
-                    </div>
-                    <div class="mt-3 pt-3 border-t border-space-border/30 space-y-1">
-                        <div class="flex items-center justify-between text-xs">
-                            <span class="text-gray-500" x-text="t('resetWindow')"></span>
-                            <span class="font-mono text-gray-300" x-text="quotaResetSummary(selectedAccount) || '-'"></span>
-                        </div>
-                        <template x-if="quotaResetAtLabel(selectedAccount)">
-                            <div class="flex items-center justify-between text-xs">
-                                <span class="text-gray-500" x-text="t('resetsAt')"></span>
-                                <span class="font-mono text-gray-300" x-text="quotaResetAtLabel(selectedAccount)"></span>
+            <div class="space-y-3 max-h-[60vh] overflow-y-auto">
+                <!-- Codex plans report two rate-limit windows (primary 5h + secondary weekly); one row each -->
+                <template x-if="chatgptQuotaWindows(selectedAccount).length > 0">
+                    <div class="space-y-3">
+                        <template x-for="(row, idx) in chatgptQuotaWindows(selectedAccount)" :key="idx">
+                            <div class="p-3 bg-space-800/50 border border-space-border/30 rounded-lg">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-sm font-semibold text-gray-200" x-text="row.label"></span>
+                                    <template x-if="row.remaining > 0">
+                                        <span class="text-xs font-mono" :class="row.textClass"
+                                            x-text="row.remaining + '% ' + t('remaining')"></span>
+                                    </template>
+                                    <template x-if="row.remaining <= 0">
+                                        <span class="text-[10px] font-bold uppercase text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/30" x-text="t('quotaExhausted')"></span>
+                                    </template>
+                                </div>
+                                <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                                    <div class="h-full rounded-full transition-all" :class="row.barClass" :style="`width: ${row.remaining}%`"></div>
+                                </div>
+                                <div class="mt-3 pt-3 border-t border-space-border/30 space-y-1">
+                                    <div class="flex items-center justify-between text-xs">
+                                        <span class="text-gray-500" x-text="t('resetWindow')"></span>
+                                        <span class="font-mono text-gray-300" x-text="row.resetSummary || '-'"></span>
+                                    </div>
+                                    <template x-if="row.resetAtLabel">
+                                        <div class="flex items-center justify-between text-xs">
+                                            <span class="text-gray-500" x-text="t('resetsAt')"></span>
+                                            <span class="font-mono text-gray-300" x-text="row.resetAtLabel"></span>
+                                        </div>
+                                    </template>
+                                </div>
                             </div>
                         </template>
                     </div>
-                </div>
+                </template>
+
+                <!-- Fallback: aggregated usage when raw rate-limit windows are unavailable -->
+                <template x-if="chatgptQuotaWindows(selectedAccount).length === 0 && getRemainingPercentage(selectedAccount) !== null">
+                    <div class="p-3 bg-space-800/50 border border-space-border/30 rounded-lg">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-sm font-semibold text-gray-200" x-text="t('usage')"></span>
+                            <template x-if="!isQuotaExhausted(selectedAccount)">
+                                <span class="text-xs font-mono"
+                                    :class="quotaTextClass(selectedAccount)"
+                                    x-text="quotaLabel(selectedAccount) + ' ' + t('remaining')"></span>
+                            </template>
+                            <template x-if="isQuotaExhausted(selectedAccount)">
+                                <span class="text-[10px] font-bold uppercase text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/30" x-text="t('quotaExhausted')"></span>
+                            </template>
+                        </div>
+                        <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                            <div class="h-full rounded-full transition-all"
+                                :class="quotaBarClass(selectedAccount)"
+                                :style="`width: ${getRemainingPercentage(selectedAccount)}%`"></div>
+                        </div>
+                        <div class="mt-3 pt-3 border-t border-space-border/30 space-y-1">
+                            <div class="flex items-center justify-between text-xs">
+                                <span class="text-gray-500" x-text="t('resetWindow')"></span>
+                                <span class="font-mono text-gray-300" x-text="quotaResetSummary(selectedAccount) || '-'"></span>
+                            </div>
+                            <template x-if="quotaResetAtLabel(selectedAccount)">
+                                <div class="flex items-center justify-between text-xs">
+                                    <span class="text-gray-500" x-text="t('resetsAt')"></span>
+                                    <span class="font-mono text-gray-300" x-text="quotaResetAtLabel(selectedAccount)"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
             </div>
 
             <div class="mt-6 flex justify-end">
@@ -1142,7 +1184,7 @@
 
     <div x-show="showAntigravityQuotaModal" x-transition class="fixed inset-0 z-50 flex items-center justify-center p-4" style="display: none;">
         <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showAntigravityQuotaModal = false"></div>
-        <div class="relative bg-space-900 border border-space-border rounded-xl shadow-2xl max-w-4xl w-full p-6">
+        <div class="relative bg-space-900 border border-space-border rounded-xl shadow-2xl max-w-2xl w-full p-6">
             <div class="flex items-start justify-between gap-4 mb-6">
                 <div>
                     <h3 class="font-bold text-lg text-white" x-text="t('antigravityModelQuotas')"></h3>
@@ -1167,36 +1209,47 @@
             </div>
 
             <div class="max-h-[60vh] overflow-y-auto space-y-3">
-                <template x-for="model in antigravityQuotaModels(selectedAntigravityAccount)" :key="model.publicId">
+                <!-- The API reports the same quotaInfo for every model: one shared window, not one per model -->
+                <template x-if="antigravityQuotaWindow(selectedAntigravityAccount)">
                     <div class="p-4 rounded-xl border border-space-border/40 bg-space-800/40">
-                        <div class="flex items-start justify-between gap-4">
-                            <div class="min-w-0">
-                                <div class="text-sm font-semibold text-white truncate" x-text="model.displayName"></div>
-                                <div class="text-[10px] font-mono text-gray-500 mt-1" x-text="model.publicId"></div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm font-semibold text-white" x-text="t('antigravitySharedQuota')"></span>
+                            <span class="text-xs font-mono" :class="antigravityQuotaWindow(selectedAntigravityAccount).textClass"
+                                x-text="antigravityQuotaWindow(selectedAntigravityAccount).remaining + '% ' + t('remaining')"></span>
+                        </div>
+                        <div class="w-full h-2 rounded-full bg-space-950 overflow-hidden">
+                            <div class="h-full rounded-full transition-all" :class="antigravityQuotaWindow(selectedAntigravityAccount).barClass"
+                                :style="`width: ${antigravityQuotaWindow(selectedAntigravityAccount).remaining}%`"></div>
+                        </div>
+                        <template x-if="antigravityQuotaWindow(selectedAntigravityAccount).resetAtLabel">
+                            <div class="mt-3 text-xs text-gray-500">
+                                <span x-text="t('resetAt')"></span>: <span class="text-gray-300 font-mono" x-text="antigravityQuotaWindow(selectedAntigravityAccount).resetAtLabel"></span>
                             </div>
-                            <div class="flex items-center gap-2 text-[10px] font-mono">
-                                <template x-if="model.supportsThinking">
-                                    <span class="px-2 py-1 rounded bg-blue-500/10 text-blue-300 border border-blue-500/30" x-text="t('thinkingLabel')"></span>
-                                </template>
-                                <template x-if="model.supportsImages">
-                                    <span class="px-2 py-1 rounded bg-purple-500/10 text-purple-300 border border-purple-500/30" x-text="t('imageLabel')"></span>
-                                </template>
-                                <template x-if="model.recommended">
-                                    <span class="px-2 py-1 rounded bg-green-500/10 text-green-300 border border-green-500/30" x-text="t('recommendedLabel')"></span>
-                                </template>
-                                <span :class="antigravityQuotaTextClass(model)" x-text="antigravityQuotaPercent(model) !== null ? antigravityQuotaPercent(model) + '%' : '-'"></span>
-                            </div>
-                        </div>
-                        <div class="w-full h-2 rounded-full bg-space-950 overflow-hidden mt-3">
-                            <div class="h-full rounded-full transition-all" :class="antigravityQuotaBarClass(model)"
-                                :style="`width: ${antigravityQuotaPercent(model) || 0}%`"></div>
-                        </div>
-                        <div class="mt-3 text-xs text-gray-500">
-                            <span x-text="t('resetAt')"></span>: <span class="text-gray-300 font-mono" x-text="antigravityQuotaResetLabel(model)"></span>
-                        </div>
+                        </template>
+                        <p class="mt-2 text-[10px] text-gray-600" x-text="t('antigravitySharedQuotaHint')"></p>
                     </div>
                 </template>
-                <template x-if="antigravityQuotaModels(selectedAntigravityAccount).length === 0">
+
+                <template x-if="antigravityQuotaModels(selectedAntigravityAccount).length > 0">
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="model in antigravityQuotaModels(selectedAntigravityAccount)" :key="model.publicId">
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-space-800/60 border border-space-border/40 text-xs text-gray-300">
+                                <span x-text="model.displayName"></span>
+                                <template x-if="model.supportsThinking">
+                                    <span class="text-[9px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/30 font-mono uppercase" x-text="t('thinkingLabel')"></span>
+                                </template>
+                                <template x-if="model.supportsImages">
+                                    <span class="text-[9px] px-1 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/30 font-mono uppercase" x-text="t('imageLabel')"></span>
+                                </template>
+                                <template x-if="model.recommended">
+                                    <span class="text-[9px] px-1 py-0.5 rounded bg-green-500/10 text-green-300 border border-green-500/30 font-mono uppercase" x-text="t('recommendedLabel')"></span>
+                                </template>
+                            </span>
+                        </template>
+                    </div>
+                </template>
+
+                <template x-if="!antigravityQuotaWindow(selectedAntigravityAccount) && antigravityQuotaModels(selectedAntigravityAccount).length === 0">
                     <div class="p-6 rounded-xl border border-space-border/40 bg-space-800/40 text-sm text-gray-500 font-mono">
                         <span x-text="t('noQuotaDataAvailableForAccount')"></span>
                     </div>

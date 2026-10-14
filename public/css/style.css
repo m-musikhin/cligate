@@ -212,6 +212,10 @@ html.light .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(197, 20
 html.light .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(197, 203, 214, 0.9); }
 
 html.light .bg-gray-700 { background-color: rgba(203, 213, 225, 0.9); }
+html.light .bg-yellow-500 { background-color: #eab308; }
+html.light .bg-red-500 { background-color: #ef4444; }
+html.light .bg-green-500 { background-color: #22c55e; }
+html.light .bg-cyan-400 { background-color: #0891b2; }
 
 html.light .group:hover .group-hover\:text-white { color: #0f172a; }
 html.light .group:hover .group-hover\:text-cyan-400 { color: #0891b2; }
@@ -5022,6 +5026,24 @@ html.light .chat-runtime-summary {
 
 .bg-gray-700 {
     background-color: rgba(55, 65, 81, 0.9);
+}
+
+/* Plain yellow/red/green fills are referenced only from JS helpers
+   (quota/usage bar classes), so the Tailwind build never emitted them. */
+.bg-yellow-500 {
+    background-color: #eab308;
+}
+
+.bg-red-500 {
+    background-color: #ef4444;
+}
+
+.bg-green-500 {
+    background-color: #22c55e;
+}
+
+.bg-cyan-400 {
+    background-color: #22d3ee;
 }
 
 .h-0 {

@@ -345,6 +345,61 @@ export function createAccountsPageModule() {
       return dict.resetsInM(minutes);
     },
 
+    // Codex plans report two rate-limit windows in usage.raw.rate_limit —
+    // primary (5h) and secondary (weekly) — each with used_percent and its
+    // own reset; render one row per window instead of a single aggregate.
+    chatgptQuotaWindows(account) {
+      const rateLimit = account?.quota?.usage?.raw?.rate_limit;
+      if (!rateLimit) return [];
+
+      const windows = [rateLimit.primary_window, rateLimit.secondary_window]
+        .filter((w) => w && Number.isFinite(Number(w.used_percent)));
+
+      return windows.map((w) => {
+        const used = Math.max(0, Math.min(100, Number(w.used_percent)));
+        const remaining = Math.round(100 - used);
+        return {
+          label: this._chatgptWindowLabel(Number(w.limit_window_seconds)),
+          remaining,
+          barClass: remaining > 50 ? 'bg-neon-green' : (remaining > 20 ? 'bg-yellow-500' : 'bg-red-500'),
+          textClass: remaining <= 20 ? 'text-red-400' : 'text-gray-400',
+          resetSummary: this._chatgptWindowResetSummary(w),
+          resetAtLabel: this._chatgptWindowResetAtLabel(w)
+        };
+      });
+    },
+
+    _chatgptWindowLabel(seconds) {
+      if (!Number.isFinite(seconds) || seconds <= 0) return 'window';
+      if (seconds === 604800) return 'Weekly';
+      if (seconds === 2592000) return 'Monthly';
+      if (seconds === 18000) return '5h window';
+      if (seconds % 86400 === 0) return `${seconds / 86400}d window`;
+      if (seconds % 3600 === 0) return `${seconds / 3600}h window`;
+      return `${Math.round(seconds / 60)}m window`;
+    },
+
+    _chatgptWindowResetSummary(windowData) {
+      const resetAfter = Number(windowData?.reset_after_seconds);
+      if (!Number.isFinite(resetAfter) || resetAfter <= 0) return null;
+
+      const deltaSec = Math.floor(resetAfter);
+      const dict = i18n[this.lang] || i18n.en;
+      const days = Math.floor(deltaSec / 86400);
+      const hours = Math.floor((deltaSec % 86400) / 3600);
+      const minutes = Math.floor((deltaSec % 3600) / 60);
+      if (days > 0) return dict.resetsInDH(days, hours);
+      if (hours > 0) return dict.resetsInHM(hours, minutes);
+      return dict.resetsInM(minutes);
+    },
+
+    _chatgptWindowResetAtLabel(windowData) {
+      const epoch = Number(windowData?.reset_at);
+      if (!Number.isFinite(epoch) || epoch <= 0) return null;
+      const date = new Date(epoch * 1000);
+      return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
+    },
+
     async startOAuth() {
       await this.api('/accounts/oauth/cleanup', { method: 'POST' });
       const { ok, data } = await this.api('/accounts/add', { method: 'POST' });
@@ -719,31 +774,80 @@ export function createAccountsPageModule() {
       return this.antigravityQuotaModels(account).slice(0, 3);
     },
 
-    antigravityQuotaPercent(model) {
-      const value = Number(model?.quota?.remainingPercent);
+    antigravityQuotaPercent(quota) {
+      const value = Number(quota?.remainingPercent);
       return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : null;
     },
 
-    antigravityQuotaBarClass(model) {
-      const remaining = this.antigravityQuotaPercent(model);
+    antigravityQuotaBarClass(quota) {
+      const remaining = this.antigravityQuotaPercent(quota);
       if (remaining === null) return 'bg-gray-600';
       if (remaining <= 20) return 'bg-red-500';
       if (remaining <= 50) return 'bg-yellow-500';
       return 'bg-cyan-400';
     },
 
-    antigravityQuotaTextClass(model) {
-      const remaining = this.antigravityQuotaPercent(model);
+    antigravityQuotaTextClass(quota) {
+      const remaining = this.antigravityQuotaPercent(quota);
       if (remaining === null) return 'text-gray-500';
       if (remaining <= 20) return 'text-red-400';
       if (remaining <= 50) return 'text-yellow-400';
       return 'text-cyan-300';
     },
 
-    antigravityQuotaResetLabel(model) {
-      if (!model?.quota?.resetTime) return '-';
-      const resetAt = new Date(model.quota.resetTime);
-      return Number.isNaN(resetAt.getTime()) ? '-' : resetAt.toLocaleString();
+    antigravityQuotaResetLabel(quota) {
+      if (!quota?.resetTime) return null;
+      const resetAt = new Date(quota.resetTime);
+      return Number.isNaN(resetAt.getTime()) ? null : resetAt.toLocaleString();
+    },
+
+    // fetchAvailableModels reports the same quotaInfo for every model — one
+    // shared server-side bucket — so the account renders a single global
+    // window while the models stay listed as chips (not one bar each).
+    antigravityQuotaWindow(account) {
+      const models = this.antigravityQuotaModels(account);
+      if (!models.length) return null;
+
+      const distinct = [];
+      const seen = new Set();
+      for (const model of models) {
+        const quota = model.quota;
+        const signature = `${quota.remainingPercent}|${quota.resetTime || ''}`;
+        if (!seen.has(signature)) {
+          seen.add(signature);
+          distinct.push(quota);
+        }
+      }
+      const quota = distinct.find((entry) => entry.resetTime) || distinct[0];
+      const remaining = this.antigravityQuotaPercent(quota);
+      if (remaining === null) return null;
+      return {
+        remaining,
+        barClass: this.antigravityQuotaBarClass(quota),
+        textClass: this.antigravityQuotaTextClass(quota),
+        resetAt: quota.resetTime || null,
+        resetAtLabel: this.antigravityQuotaResetLabel(quota),
+        modelCount: models.length
+      };
+    },
+
+    antigravityQuotaResetSummary(account) {
+      const windowData = this.antigravityQuotaWindow(account);
+      if (!windowData?.resetAt) return null;
+
+      const resetMs = new Date(windowData.resetAt).getTime();
+      if (!Number.isFinite(resetMs)) return null;
+
+      const deltaSec = Math.max(0, Math.floor((resetMs - Date.now()) / 1000));
+      if (deltaSec === 0) return this.t('resetDueNow');
+
+      const days = Math.floor(deltaSec / 86400);
+      const hours = Math.floor((deltaSec % 86400) / 3600);
+      const minutes = Math.floor((deltaSec % 3600) / 60);
+      const dict = i18n[this.lang] || i18n.en;
+      if (days > 0) return dict.resetsInDH(days, hours);
+      if (hours > 0) return dict.resetsInHM(hours, minutes);
+      return dict.resetsInM(minutes);
     },
 
     antigravityQuotaSummaryLabel(account) {

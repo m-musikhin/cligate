@@ -481,23 +481,23 @@
                                                 <span class="text-[10px] font-mono text-gray-500 uppercase tracking-wider" x-text="antigravityQuotaSummaryLabel(acc)"></span>
                                                 <span class="text-[10px] font-mono text-cyan-300" x-text="acc.quotaSummary?.subscriptionType || acc.subscriptionType || '-'"></span>
                                             </div>
-                                            <template x-if="antigravityQuotaPreviewModels(acc).length > 0">
-                                                <div class="space-y-2">
-                                                    <template x-for="model in antigravityQuotaPreviewModels(acc)" :key="model.publicId">
-                                                        <div>
-                                                            <div class="flex items-center justify-between text-[11px] font-mono mb-1">
-                                                                <span class="text-gray-400 truncate mr-2" x-text="model.displayName"></span>
-                                                                <span :class="antigravityQuotaTextClass(model)" x-text="antigravityQuotaPercent(model) !== null ? antigravityQuotaPercent(model) + '%' : '-'"></span>
-                                                            </div>
-                                                            <div class="w-full h-1.5 rounded-full bg-space-900 overflow-hidden">
-                                                                <div class="h-full rounded-full transition-all" :class="antigravityQuotaBarClass(model)"
-                                                                    :style="`width: ${antigravityQuotaPercent(model) || 0}%`"></div>
-                                                            </div>
+                                            <!-- All models share one server-side quota bucket, so a single global bar -->
+                                            <template x-if="antigravityQuotaWindow(acc)">
+                                                <div class="space-y-1.5">
+                                                    <div class="flex items-center gap-2">
+                                                        <div class="w-16 h-1.5 rounded-full bg-space-900 overflow-hidden">
+                                                            <div class="h-full rounded-full transition-all" :class="antigravityQuotaWindow(acc).barClass"
+                                                                :style="`width: ${antigravityQuotaWindow(acc).remaining}%`"></div>
                                                         </div>
+                                                        <span class="text-[11px] font-mono" :class="antigravityQuotaWindow(acc).textClass"
+                                                            x-text="antigravityQuotaWindow(acc).remaining + '%'"></span>
+                                                    </div>
+                                                    <template x-if="antigravityQuotaResetSummary(acc)">
+                                                        <div class="text-[10px] font-mono text-gray-500" x-text="antigravityQuotaResetSummary(acc)"></div>
                                                     </template>
                                                 </div>
                                             </template>
-                                            <template x-if="antigravityQuotaPreviewModels(acc).length === 0">
+                                            <template x-if="!antigravityQuotaWindow(acc)">
                                                 <div class="text-[10px] font-mono text-gray-500" x-text="t('noQuotaDataYet')"></div>
                                             </template>
                                         </button>

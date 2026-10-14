@@ -76,16 +76,23 @@ export function createApiKeysPageModule() {
 
     // Normalized snapshot: { kind: 'percent', remaining, window } |
     // { kind: 'balance', remaining, unit } | null. For window-based plans the
-    // bar tracks the most-consumed window (the binding limit).
+    // bar tracks the soonest-resetting window (five_hour first, then the one
+    // with the earliest resetsAt) — the limit users think in.
     apiKeyUsageState(key) {
       const usage = key?.usage;
       if (!usage) return null;
 
       const windows = Array.isArray(usage.windows) ? usage.windows : [];
-      const binding = windows
+      const candidates = windows
         .map((w) => ({ ...w, used: Number(w.percentUsed) }))
-        .filter((w) => Number.isFinite(w.used))
-        .sort((a, b) => b.used - a.used)[0] || null;
+        .filter((w) => Number.isFinite(w.used));
+      const byId = (id) => candidates.find((w) => w.id === id) || null;
+      const binding = byId('five_hour')
+        || candidates
+          .filter((w) => w.resetsAt && Number.isFinite(new Date(w.resetsAt).getTime()))
+          .sort((a, b) => new Date(a.resetsAt) - new Date(b.resetsAt))[0]
+        || candidates[0]
+        || null;
       if (binding) {
         const used = Math.max(0, Math.min(100, binding.used));
         return { kind: 'percent', remaining: Math.round(100 - used), window: binding };
@@ -163,8 +170,8 @@ export function createApiKeysPageModule() {
     },
 
     // ─── Usage details modal (unified with the accounts quota modal) ────────
-    // Clicking a key's limits cell opens this modal (like showQuotaModal for
-    // ChatGPT accounts) and silently refreshes the snapshot. Windows plans
+    // Clicking a key's limits cell opens this modal without refetching —
+    // the explicit refresh icon lives in the actions column. Windows plans
     // list every window with its own bar + reset time; balance plans list the
     // breakdown parts (monthly credits / added credits) plus the total.
 
@@ -197,10 +204,10 @@ export function createApiKeysPageModule() {
     },
 
     openKeyUsageModal(key) {
+      // Click opens the modal only; the status refresh is a separate icon in
+      // the actions column (same pattern as the account quota cells).
       this.selectedUsageKeyId = key.id;
       this.showKeyUsageModal = true;
-      // Same pattern as the accounts quota cells: opening the modal refreshes.
-      this.refreshApiKeyUsage(key, { silent: true });
     },
 
     async refreshApiKeyUsage(key, { silent = false } = {}) {
