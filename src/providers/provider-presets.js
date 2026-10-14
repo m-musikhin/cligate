@@ -36,6 +36,12 @@
  *   passthroughModelMatch string? if a model id includes this substring, pass it through (e.g. '/')
  *   validateModel         string? vendors without GET /models: validateKey sends a 1-token
  *                                 chat request with this model instead (e.g. Zhipu)
+ *   usage                 object? subscription/quota endpoint for the API Keys page:
+ *                                 { format: 'cline-plan' | 'ollama-balance',
+ *                                   baseUrl?: string (default: preset baseUrl),
+ *                                   path?: string (default depends on format) }
+ *                                 Parsed into a normalized { windows | balance } snapshot
+ *                                 shown next to the key (see openai-compatible.js fetchUsage).
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -179,6 +185,10 @@ export const PROVIDER_PRESETS = [
     website: 'https://app.cline.bot',
     keyHint: 'API key (app.cline.bot → Settings → API Keys)',
     nativeModelPrefixes: ['cline-pass/'],
+    // Subscription limits live behind a per-user endpoint next to the chat API
+    // (path resolved against the preset baseUrl). The plan's total token
+    // budget is not published — only percent-used + reset times per window.
+    usage: { format: 'cline-plan' },
     models: [
       'cline-pass/glm-5.3',
       'cline-pass/glm-5.3-flash',
@@ -234,6 +244,9 @@ export const PROVIDER_PRESETS = [
     keyHint: 'API key (ollama.com/settings/keys)',
     nativeModelPrefixes: ['gpt-oss', 'glm', 'kimi', 'deepseek', 'minimax', 'gemma', 'mistral', 'nemotron', 'qwen', 'llama', 'phi', 'granite'],
     passthroughModelMatch: ':',
+    // Balance lives on the plain API host (/api/balance), not under /v1, so
+    // the usage baseUrl overrides the preset's chat baseUrl.
+    usage: { format: 'ollama-balance', baseUrl: 'https://ollama.com', path: '/api/balance' },
     models: [
       'glm-5.3',
       'glm-5.3-flash',
@@ -287,6 +300,7 @@ const USER_PRESETS_FILE = join(CONFIG_DIR, 'provider-presets.json');
 const PRESET_API_FORMATS = new Set(['openai_chat', 'openai_responses', 'anthropic', 'gemini_native']);
 const PRESET_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const PRESET_TIER_KEYS = TIERS;
+const USAGE_FORMATS = new Set(['cline-plan', 'ollama-balance']);
 
 function userPresetProblem(entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -325,6 +339,20 @@ function userPresetProblem(entry) {
   }
   if (entry.validateModel !== undefined && (typeof entry.validateModel !== 'string' || !entry.validateModel.trim())) {
     return `preset "${entry.id}": validateModel must be a non-empty string`;
+  }
+  if (entry.usage !== undefined) {
+    if (!entry.usage || typeof entry.usage !== 'object' || Array.isArray(entry.usage)) {
+      return `preset "${entry.id}": usage must be an object`;
+    }
+    if (!USAGE_FORMATS.has(entry.usage.format)) {
+      return `preset "${entry.id}": usage.format must be one of ${[...USAGE_FORMATS].join(', ')}`;
+    }
+    if (entry.usage.baseUrl !== undefined && (typeof entry.usage.baseUrl !== 'string' || !entry.usage.baseUrl.trim())) {
+      return `preset "${entry.id}": usage.baseUrl must be a non-empty string`;
+    }
+    if (entry.usage.path !== undefined && (typeof entry.usage.path !== 'string' || !entry.usage.path.trim())) {
+      return `preset "${entry.id}": usage.path must be a non-empty string`;
+    }
   }
   return null;
 }
@@ -408,7 +436,7 @@ export const presetStaticModels = () =>
 
 /** Lightweight list for the dashboard add-key form. */
 export const presetUiList = () =>
-  PROVIDER_PRESETS.map(({ id, label, labelKey, badge, baseUrl, keyHint, website }) => ({
+  PROVIDER_PRESETS.map(({ id, label, labelKey, badge, baseUrl, keyHint, website, usage }) => ({
     id,
     label,
     labelKey,
@@ -416,6 +444,9 @@ export const presetUiList = () =>
     baseUrl,
     keyHint,
     website,
+    // Exposed so the UI can show the usage/limits column only for presets
+    // that declare a fetchable quota endpoint.
+    usage,
   }));
 
 export default {

@@ -13,7 +13,7 @@ import { GeminiProvider } from './providers/gemini.js';
 import { AzureOpenAIProvider } from './providers/azure-openai.js';
 import { VertexAIProvider } from './providers/vertex-ai.js';
 import { DeepSeekProvider } from './providers/deepseek.js';
-import { PROVIDER_PRESETS } from './providers/provider-presets.js';
+import { PROVIDER_PRESETS, PRESET_BY_ID } from './providers/provider-presets.js';
 import { makeOpenAICompatibleProvider } from './providers/openai-compatible.js';
 
 const API_KEYS_FILE = join(CONFIG_DIR, 'api-keys.json');
@@ -259,6 +259,52 @@ export async function validateApiKey(id) {
 
     const valid = await provider.validateKey();
     return { valid };
+}
+
+// Usage snapshots are refetched at most every 5 minutes unless explicitly
+// refreshed — mirrors the account-quota route's TTL so N dashboard polls
+// don't hammer the provider's quota endpoint.
+const KEY_USAGE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Fetch (or serve the cached) subscription usage for one API key. Only
+ * providers whose preset declares a `usage` endpoint support this (ClinePass
+ * plan limits, Ollama Cloud balance — see openai-compatible.js fetchUsage).
+ * The last snapshot lives on the key record (provider.usage / usageUpdatedAt)
+ * and is persisted through saveKeys, so the API Keys page shows it after a
+ * restart without waiting on an upstream request.
+ */
+export async function getApiKeyUsage(id, { refresh = false } = {}) {
+    const data = loadKeys();
+    const key = data.keys.find(k => k.id === id);
+    if (!key) return { success: false, error: 'Key not found' };
+
+    const provider = getProvider(key);
+    // Gate on the preset, not just the method: the generic class always
+    // defines fetchUsage, but presets without `usage` have no endpoint.
+    const hasUsageEndpoint = !!PRESET_BY_ID[key.type]?.usage?.format
+        && typeof provider?.fetchUsage === 'function';
+    if (!hasUsageEndpoint) {
+        return { success: true, supported: false, usage: null, usageUpdatedAt: null };
+    }
+
+    const updatedAt = Date.parse(provider.usageUpdatedAt || '');
+    const fresh = Number.isFinite(updatedAt) && (Date.now() - updatedAt) < KEY_USAGE_TTL_MS;
+    if (!refresh && fresh && provider.usage) {
+        return { success: true, supported: true, usage: provider.usage, usageUpdatedAt: provider.usageUpdatedAt, cached: true };
+    }
+
+    try {
+        const usage = await provider.fetchUsage();
+        provider.usage = usage;
+        provider.usageUpdatedAt = new Date().toISOString();
+        saveKeys();
+        return { success: true, supported: true, usage, usageUpdatedAt: provider.usageUpdatedAt, cached: false };
+    } catch (err) {
+        // Upstream failure: surface the error but keep serving the stale
+        // snapshot so the UI doesn't lose the last known limits.
+        return { success: false, supported: true, error: err.message, usage: provider.usage || null, usageUpdatedAt: provider.usageUpdatedAt || null };
+    }
 }
 
 export function recordUsage(id, { inputTokens = 0, outputTokens = 0, model = '' } = {}) {

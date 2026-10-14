@@ -1,3 +1,5 @@
+import { i18n } from '../i18n.js';
+
 export function createApiKeysPageModule() {
   return {
     keyPlaceholders: {
@@ -49,6 +51,111 @@ export function createApiKeysPageModule() {
       if (state === 'disabled') return 'text-red-400';
       if (state === 'active') return 'text-neon-green';
       return 'text-gray-500';
+    },
+
+    // ─── Usage/limits column (ClinePass plan limits, Ollama Cloud balance) ──
+    // A key supports the limits cell when its preset declares a `usage`
+    // endpoint; the backend serves a ≤5-min cached snapshot, refresh on click.
+
+    apiKeyUsageSupported(key) {
+      const preset = this.presetProviders.find((p) => p.id === key.type);
+      return !!preset?.usage?.format;
+    },
+
+    apiKeyUsageLoading(key) {
+      return key._usageLoading === true;
+    },
+
+    // Normalized snapshot: { kind: 'percent', remaining, window } |
+    // { kind: 'balance', remaining, unit } | null. For window-based plans the
+    // bar tracks the most-consumed window (the binding limit).
+    apiKeyUsageState(key) {
+      const usage = key?.usage;
+      if (!usage) return null;
+
+      const windows = Array.isArray(usage.windows) ? usage.windows : [];
+      const binding = windows
+        .map((w) => ({ ...w, used: Number(w.percentUsed) }))
+        .filter((w) => Number.isFinite(w.used))
+        .sort((a, b) => b.used - a.used)[0] || null;
+      if (binding) {
+        const used = Math.max(0, Math.min(100, binding.used));
+        return { kind: 'percent', remaining: Math.round(100 - used), window: binding };
+      }
+
+      const balance = usage.balance;
+      if (balance && Number.isFinite(Number(balance.remaining))) {
+        return { kind: 'balance', remaining: Number(balance.remaining), unit: balance.unit || 'USD' };
+      }
+      return null;
+    },
+
+    apiKeyUsageRemaining(key) {
+      const state = this.apiKeyUsageState(key);
+      return state?.kind === 'percent' ? state.remaining : null;
+    },
+
+    apiKeyUsageBalanceRemaining(key) {
+      const state = this.apiKeyUsageState(key);
+      return state?.kind === 'balance' ? state.remaining : 0;
+    },
+
+    apiKeyUsageBarClass(key) {
+      const remaining = this.apiKeyUsageRemaining(key);
+      if (remaining === null) return 'bg-gray-500';
+      if (remaining > 50) return 'bg-neon-green';
+      if (remaining > 20) return 'bg-yellow-500';
+      return 'bg-red-500';
+    },
+
+    apiKeyUsageTextClass(key) {
+      const remaining = this.apiKeyUsageRemaining(key);
+      return remaining !== null && remaining <= 20 ? 'text-red-400' : 'text-gray-400';
+    },
+
+    apiKeyUsageResetSummary(key) {
+      const state = this.apiKeyUsageState(key);
+      const resetsAt = state?.window?.resetsAt;
+      if (!resetsAt) return null;
+
+      const resetMs = new Date(resetsAt).getTime();
+      if (!Number.isFinite(resetMs)) return null;
+
+      const deltaSec = Math.max(0, Math.floor((resetMs - Date.now()) / 1000));
+      if (deltaSec === 0) return this.t('resetDueNow');
+
+      const days = Math.floor(deltaSec / 86400);
+      const hours = Math.floor((deltaSec % 86400) / 3600);
+      const minutes = Math.floor((deltaSec % 3600) / 60);
+
+      const dict = i18n[this.lang] || i18n.en;
+      if (days > 0) return dict.resetsInDH(days, hours);
+      if (hours > 0) return dict.resetsInHM(hours, minutes);
+      return dict.resetsInM(minutes);
+    },
+
+    apiKeyUsagePeriodSummary(key) {
+      const period = key?.usage?.balance?.period;
+      return typeof period === 'string' && period ? period : null;
+    },
+
+    async refreshApiKeyUsage(key, { silent = false } = {}) {
+      const target = typeof key === 'string'
+        ? this.apiKeysList.find((entry) => entry.id === key)
+        : key;
+      if (!target) return;
+      target._usageLoading = true;
+      const { ok, data } = await this.api(`/api/keys/${target.id}/usage?refresh=true`);
+      target._usageLoading = false;
+      if (ok && data?.success && data?.usage) {
+        target.usage = data.usage;
+        target.usageUpdatedAt = data.usageUpdatedAt;
+        if (!silent) this.showToast(this.t('apiKeyUsageRefreshed'), 'success');
+      } else if (ok && data?.supported === false) {
+        if (!silent) this.showToast(this.t('apiKeyUsageUnsupported'), 'error');
+      } else {
+        if (!silent) this.showToast(data?.error || this.t('apiKeyUsageRefreshFailed'), 'error');
+      }
     },
 
     // Load declarative provider presets (provider-presets.js) and merge them
@@ -105,6 +212,14 @@ export function createApiKeysPageModule() {
             totalRequests: data.stats.totalRequests || 0,
             totalCost: data.stats.totalCost || 0
           };
+        }
+        // Warm the limits cell for usage-enabled keys that have no snapshot
+        // yet (first visit or pre-feature records). The backend serves a
+        // ≤5-min cached snapshot, so this is at most one request per key.
+        for (const key of this.apiKeysList) {
+          if (this.apiKeyUsageSupported(key) && !key.usage && !key._usageLoading) {
+            this.refreshApiKeyUsage(key, { silent: true });
+          }
         }
       }
     },

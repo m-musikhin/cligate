@@ -44,7 +44,7 @@
 
                 <!-- Keys table -->
                 <div class="view-card account-table-shell !p-0 overflow-x-auto">
-                    <table class="account-table w-full min-w-[700px]">
+                    <table class="account-table w-full min-w-[860px]">
                         <thead x-show="apiKeysList.length > 0">
                             <tr class="bg-space-900/50 border-b border-space-border/50">
                                 <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider" x-text="t('status')"></th>
@@ -53,13 +53,14 @@
                                 <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider" x-text="t('apiKeyLabel')"></th>
                                 <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider" x-text="t('totalReqs')"></th>
                                 <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider" x-text="t('totalCostLabel')"></th>
+                                <th class="py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider" x-text="t('apiKeyUsage')"></th>
                                 <th class="py-3 text-right text-[10px] font-bold text-gray-500 uppercase tracking-wider" x-text="t('operations')"></th>
                             </tr>
                         </thead>
                         <tbody>
                             <template x-if="apiKeysList.length === 0">
                                 <tr>
-                                    <td colspan="7" class="py-16 text-center">
+                                    <td colspan="8" class="py-16 text-center">
                                         <div class="account-empty-state flex flex-col items-center justify-center gap-4 max-w-lg mx-auto">
                                             <svg class="w-16 h-16 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
@@ -103,6 +104,40 @@
                                     <td class="py-4"><span class="font-mono text-xs text-gray-500" x-text="key.apiKey"></span></td>
                                     <td class="py-4"><span class="font-mono text-sm text-gray-300" x-text="key.totalRequests"></span></td>
                                     <td class="py-4"><span class="font-mono text-sm text-neon-green" x-text="'$' + key.totalCost.toFixed(4)"></span></td>
+                                    <td class="py-4" :class="apiKeyUsageSupported(key) ? 'cursor-pointer' : ''"
+                                        @click="apiKeyUsageSupported(key) && refreshApiKeyUsage(key)"
+                                        :title="apiKeyUsageSupported(key) ? t('apiKeyUsageRefreshHint') : ''">
+                                        <template x-if="apiKeyUsageLoading(key)">
+                                            <span class="text-xs font-mono text-gray-500">...</span>
+                                        </template>
+                                        <template x-if="!apiKeyUsageLoading(key) && apiKeyUsageState(key)?.kind === 'percent'">
+                                            <div class="flex flex-col gap-1">
+                                                <div class="flex items-center gap-2">
+                                                    <div class="w-16 bg-gray-700 rounded-full h-2 overflow-hidden">
+                                                        <div class="h-full rounded-full transition-all" :class="apiKeyUsageBarClass(key)" :style="`width: ${apiKeyUsageRemaining(key)}%`"></div>
+                                                    </div>
+                                                    <span class="text-xs font-mono" :class="apiKeyUsageTextClass(key)" x-text="apiKeyUsageRemaining(key) + '%'"></span>
+                                                </div>
+                                                <template x-if="apiKeyUsageResetSummary(key)">
+                                                    <span class="text-[10px] font-mono text-gray-500" x-text="apiKeyUsageResetSummary(key)"></span>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <template x-if="!apiKeyUsageLoading(key) && apiKeyUsageState(key)?.kind === 'balance'">
+                                            <div class="flex flex-col gap-1">
+                                                <span class="text-xs font-mono text-neon-green" x-text="'$' + apiKeyUsageBalanceRemaining(key).toFixed(2)"></span>
+                                                <template x-if="apiKeyUsagePeriodSummary(key)">
+                                                    <span class="text-[10px] font-mono text-gray-500" x-text="apiKeyUsagePeriodSummary(key)"></span>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <template x-if="!apiKeyUsageLoading(key) && apiKeyUsageState(key) === null && !apiKeyUsageSupported(key)">
+                                            <span class="text-xs text-gray-600">-</span>
+                                        </template>
+                                        <template x-if="!apiKeyUsageLoading(key) && apiKeyUsageState(key) === null && apiKeyUsageSupported(key)">
+                                            <span class="text-xs text-gray-600" x-text="t('apiKeyUsageStale')"></span>
+                                        </template>
+                                    </td>
                                     <td class="py-4">
                                         <div class="flex justify-end gap-2">
                                             <button class="btn btn-xs-inline btn-accent-blue"

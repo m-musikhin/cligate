@@ -10,6 +10,7 @@ import {
     listApiKeys,
     getApiKeyById,
     validateApiKey,
+    getApiKeyUsage,
     getStats
 } from '../api-key-manager.js';
 import { presetUiList } from '../providers/provider-presets.js';
@@ -66,6 +67,23 @@ export function handleUpdateApiKey(req, res) {
 export async function handleValidateApiKey(req, res) {
     const { id } = req.params;
     const result = await validateApiKey(id);
+    res.json(result);
+}
+
+/**
+ * GET /api/keys/:id/usage?refresh=1
+ * Subscription usage snapshot for one key (ClinePass plan limits, Ollama
+ * Cloud balance). Serves the ≤5-minute-old cached snapshot unless refresh=1.
+ * Non-usage providers answer { supported: false } with HTTP 200 so the UI can
+ * hide the limits cell instead of treating it as an error.
+ */
+export async function handleGetApiKeyUsage(req, res) {
+    const { id } = req.params;
+    const refresh = req.query?.refresh === 'true' || req.query?.refresh === '1';
+    const result = await getApiKeyUsage(id, { refresh });
+    if (result.error === 'Key not found') {
+        return res.status(404).json(result);
+    }
     res.json(result);
 }
 

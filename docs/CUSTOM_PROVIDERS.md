@@ -51,6 +51,7 @@ Same schema as the built-in presets in `src/providers/provider-presets.js`:
 | `passthroughModelMatch` | no    | Model ids containing this substring pass through verbatim (e.g. `"/"` for `vendor/model` slugs). |
 | `pricing`            | no       | `{ "<model>": { input, output, cacheRead?, cacheWrite? } }` in USD / 1M tokens. |
 | `validateModel`      | no       | For vendors without `GET /models` (e.g. Zhipu): "test key" probes a 1-token chat request with this model instead. |
+| `usage`              | no       | Subscription/quota endpoint shown in the API Keys limits column: `{ format: "cline-plan" \| "ollama-balance", baseUrl?, path? }`. `baseUrl` defaults to the preset `baseUrl` and `path` to the format's default (`/users/me/plan/usage-limits` / `/api/balance`). Snapshots are cached for 5 minutes. |
 
 ## Validation and error handling
 
@@ -58,7 +59,7 @@ The loader runs at server start. A bad file never blocks startup — each
 invalid entry is skipped with a console warning explaining why:
 
 - collides with a built-in id → skipped (built-ins always win),
-- invalid id shape / missing `baseUrl` / unknown `apiFormat` / unknown tier key → skipped,
+- invalid id shape / missing `baseUrl` / unknown `apiFormat` / unknown tier key / unknown `usage.format` → skipped,
 - duplicate ids → first entry wins.
 
 The file must be a JSON array (or `{"presets": [...]}`).

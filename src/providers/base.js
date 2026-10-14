@@ -18,6 +18,12 @@ export class BaseProvider {
         this.totalCost = config.totalCost || 0;
         this.errors = config.errors || 0;
         this.rateLimitedUntil = config.rateLimitedUntil || null;
+        // Last fetched subscription/quota snapshot (providers with a preset
+        // `usage` endpoint, e.g. ClinePass plan limits or Ollama Cloud balance).
+        // Persisted through toJSON so the API Keys page shows the last known
+        // limits without re-fetching after a restart.
+        this.usage = config.usage || null;
+        this.usageUpdatedAt = config.usageUpdatedAt || null;
     }
 
     get isRateLimited() {
@@ -67,7 +73,9 @@ export class BaseProvider {
             totalRequests: this.totalRequests,
             totalTokens: this.totalTokens,
             totalCost: this.totalCost,
-            errors: this.errors
+            errors: this.errors,
+            usage: this.usage,
+            usageUpdatedAt: this.usageUpdatedAt
         };
     }
 
