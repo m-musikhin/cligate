@@ -48,8 +48,10 @@ function toIsoOrNull(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-// ClinePass plan limits: { five_hour: { percentUsed, resetsAt }, weekly: …,
-// monthly: … }. Total plan tokens are not published — only per-window usage.
+// ClinePass plan limits. Real response (2026-10):
+//   { data: { limits: [{ type: 'five_hour', percentUsed, resetsAt }] }, success: true }
+// Legacy direct-map shape ({ five_hour: { percentUsed, resetsAt }, … }) is
+// still accepted. Total plan tokens are not published — only per-window usage.
 const CLINE_PLAN_WINDOWS = [
   ['five_hour', '5h window'],
   ['weekly', 'Weekly'],
@@ -57,15 +59,22 @@ const CLINE_PLAN_WINDOWS = [
 ];
 
 function parseClinePlanUsage(data) {
+  const raw = data?.data?.limits ?? data;
+  const byKey = new Map(
+    Array.isArray(raw)
+      ? raw.filter((w) => w && typeof w.type === 'string').map((w) => [w.type, w])
+      : Object.entries(raw || {})
+  );
   const windows = [];
   for (const [key, label] of CLINE_PLAN_WINDOWS) {
-    const percentUsed = Number(data?.[key]?.percentUsed);
+    const entry = byKey.get(key);
+    const percentUsed = Number(entry?.percentUsed);
     if (!Number.isFinite(percentUsed)) continue;
     windows.push({
       id: key,
       label,
       percentUsed,
-      resetsAt: toIsoOrNull(data?.[key]?.resetsAt),
+      resetsAt: toIsoOrNull(entry?.resetsAt),
     });
   }
   if (windows.length === 0) {

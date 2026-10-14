@@ -37,10 +37,16 @@ function installFetchMock() {
     if (String(url).includes('/users/me/plan/usage-limits')) {
       return {
         ok: true,
+        // Real ClinePass response shape (2026-10): envelope + array of windows.
         json: async () => ({
-          five_hour: { percentUsed: 40, resetsAt: '2026-10-14T18:00:00Z' },
-          weekly: { percentUsed: 10, resetsAt: '2026-10-20T00:00:00Z' },
-          monthly: { percentUsed: 5, resetsAt: '2026-11-01T00:00:00Z' },
+          data: {
+            limits: [
+              { type: 'five_hour', percentUsed: 40, resetsAt: '2026-10-14T18:00:00Z' },
+              { type: 'weekly', percentUsed: 10, resetsAt: '2026-10-20T00:00:00Z' },
+              { type: 'monthly', percentUsed: 5, resetsAt: '2026-11-01T00:00:00Z' },
+            ],
+          },
+          success: true,
         }),
       };
     }
