@@ -112,8 +112,8 @@
                                     <td class="py-4"><span class="font-mono text-sm text-gray-300" x-text="key.totalRequests"></span></td>
                                     <td class="py-4"><span class="font-mono text-sm text-neon-green" x-text="'$' + key.totalCost.toFixed(4)"></span></td>
                                     <td class="py-4" :class="apiKeyUsageSupported(key) ? 'cursor-pointer' : ''"
-                                        @click="apiKeyUsageSupported(key) && refreshApiKeyUsage(key)"
-                                        :title="apiKeyUsageSupported(key) ? t('apiKeyUsageRefreshHint') : ''">
+                                        @click="apiKeyUsageSupported(key) && openKeyUsageModal(key)"
+                                        :title="apiKeyUsageSupported(key) ? t('apiKeyUsageDetailsHint') : ''">
                                         <template x-if="apiKeyUsageLoading(key)">
                                             <span class="text-xs font-mono text-gray-500">...</span>
                                         </template>

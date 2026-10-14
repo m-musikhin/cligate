@@ -89,32 +89,38 @@ function parseClinePlanUsage(data) {
 //     purchased: { balance_usd: 20 } }
 // included.balance_usd is the remaining monthly credit (allowance_usd is the
 // full grant — NOT remaining), purchased holds added one-time credits and may
-// be an object or an array of buckets. Remaining = monthly remainder + all
-// purchased amounts.
+// be an object or an array of buckets. remaining = monthly remainder + all
+// purchased amounts; parts keeps the breakdown for the usage modal.
 function parseOllamaBalanceUsage(data) {
   const included = data?.included ?? data; // tolerate a flat body
-  const amounts = [included?.balance_usd]
-    .map(Number)
-    .filter(Number.isFinite);
-  const purchased = data?.purchased;
-  const buckets = Array.isArray(purchased) ? purchased : purchased ? [purchased] : [];
-  amounts.push(...buckets
-    .map((p) => Number(p?.balance_usd ?? p?.amount_usd ?? p?.usd))
-    .filter(Number.isFinite));
-  if (amounts.length === 0) {
-    throw new Error('balance response contained no numeric balance');
-  }
-  // period is { from, until } — summarize by its refill/expiry date.
   const period = typeof included?.period === 'string'
     ? included.period
     : included?.period?.until || null;
+  const monthly = Number(included?.balance_usd);
+  const purchased = data?.purchased;
+  const buckets = Array.isArray(purchased) ? purchased : purchased ? [purchased] : [];
+  const purchasedAmounts = buckets
+    .map((p) => Number(p?.balance_usd ?? p?.amount_usd ?? p?.usd))
+    .filter(Number.isFinite);
+  if (!Number.isFinite(monthly) && purchasedAmounts.length === 0) {
+    throw new Error('balance response contained no numeric balance');
+  }
+  const purchasedTotal = purchasedAmounts.reduce((sum, n) => sum + n, 0);
+  const parts = [];
+  if (Number.isFinite(monthly)) {
+    parts.push({ kind: 'monthly', remaining: monthly, until: period });
+  }
+  if (purchasedAmounts.length > 0) {
+    parts.push({ kind: 'purchased', remaining: purchasedTotal });
+  }
   return {
     kind: 'balance',
     windows: [],
     balance: {
-      remaining: amounts.reduce((sum, n) => sum + n, 0),
+      remaining: (Number.isFinite(monthly) ? monthly : 0) + purchasedTotal,
       unit: 'USD',
       period,
+      parts,
     },
   };
 }

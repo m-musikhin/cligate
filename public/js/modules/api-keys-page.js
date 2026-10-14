@@ -28,6 +28,8 @@ export function createApiKeysPageModule() {
     // Custom-provider preset form (POST /api/providers/custom-presets).
     // tiers holds every tier key so Alpine's bracket x-model stays reactive.
     showCustomProviderModal: false,
+    showKeyUsageModal: false,
+    selectedUsageKeyId: null,
     customPresetSaving: false,
     customPresetTiers: ['fable', 'flagship', 'reasoning', 'standard', 'fast', 'default'],
     customPresetForm: { id: '', label: '', badge: '', baseUrl: '', apiFormat: 'openai_chat', models: '', tiers: {}, nativeModelPrefixes: '', passthroughModelMatch: '', validateModel: '' },
@@ -121,9 +123,16 @@ export function createApiKeysPageModule() {
 
     apiKeyUsageResetSummary(key) {
       const state = this.apiKeyUsageState(key);
-      const resetsAt = state?.window?.resetsAt;
-      if (!resetsAt) return null;
+      return this._formatResetIn(state?.window?.resetsAt);
+    },
 
+    apiKeyUsagePeriodSummary(key) {
+      const period = key?.usage?.balance?.period;
+      return typeof period === 'string' && period ? period : null;
+    },
+
+    _formatResetIn(resetsAt) {
+      if (!resetsAt) return null;
       const resetMs = new Date(resetsAt).getTime();
       if (!Number.isFinite(resetMs)) return null;
 
@@ -140,9 +149,58 @@ export function createApiKeysPageModule() {
       return dict.resetsInM(minutes);
     },
 
-    apiKeyUsagePeriodSummary(key) {
-      const period = key?.usage?.balance?.period;
-      return typeof period === 'string' && period ? period : null;
+    _formatResetAt(resetsAt) {
+      if (!resetsAt) return null;
+      const date = new Date(resetsAt);
+      return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
+    },
+
+    _usageWindowBarClass(percentUsed) {
+      const remaining = Math.max(0, Math.min(100, 100 - Number(percentUsed)));
+      if (remaining > 50) return 'bg-neon-green';
+      if (remaining > 20) return 'bg-yellow-500';
+      return 'bg-red-500';
+    },
+
+    // ─── Usage details modal (unified with the accounts quota modal) ────────
+    // Clicking a key's limits cell opens this modal (like showQuotaModal for
+    // ChatGPT accounts) and silently refreshes the snapshot. Windows plans
+    // list every window with its own bar + reset time; balance plans list the
+    // breakdown parts (monthly credits / added credits) plus the total.
+
+    apiKeyUsageWindowRows(key) {
+      const usage = key?.usage;
+      const windows = Array.isArray(usage?.windows) ? usage.windows : [];
+      return windows.map((w) => ({
+        label: w.label || w.id,
+        remaining: Math.max(0, Math.min(100, Math.round(100 - Number(w.percentUsed)))),
+        resetSummary: this._formatResetIn(w.resetsAt),
+        resetAtLabel: this._formatResetAt(w.resetsAt),
+        barClass: this._usageWindowBarClass(w.percentUsed),
+      }));
+    },
+
+    apiKeyUsageBalanceParts(key) {
+      const parts = key?.usage?.balance?.parts;
+      if (!Array.isArray(parts)) return [];
+      return parts.map((p) => ({
+        label: p.kind === 'purchased'
+          ? this.t('apiKeyUsageAddedCredits')
+          : this.t('apiKeyUsageMonthlyCredits'),
+        remaining: Number(p.remaining),
+        untilLabel: this._formatResetAt(p.until),
+      }));
+    },
+
+    selectedUsageKey() {
+      return this.apiKeysList.find((entry) => entry.id === this.selectedUsageKeyId) || null;
+    },
+
+    openKeyUsageModal(key) {
+      this.selectedUsageKeyId = key.id;
+      this.showKeyUsageModal = true;
+      // Same pattern as the accounts quota cells: opening the modal refreshes.
+      this.refreshApiKeyUsage(key, { silent: true });
     },
 
     async refreshApiKeyUsage(key, { silent = false } = {}) {

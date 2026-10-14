@@ -103,6 +103,10 @@ test('ollama-cloud fetchUsage sums monthly remainder + purchased credits', async
     assert.equal(usage.balance.remaining, 20.46);
     assert.equal(usage.balance.unit, 'USD');
     assert.equal(usage.balance.period, '2026-10-20T12:06:43Z');
+    assert.deepEqual(usage.balance.parts, [
+      { kind: 'monthly', remaining: 0.46, until: '2026-10-20T12:06:43Z' },
+      { kind: 'purchased', remaining: 20 },
+    ]);
     assert.deepEqual(usage.windows, []);
     assert.ok(FETCH_CALLS[0].includes('ollama.com/api/balance'), 'balance endpoint is not under /v1');
   } finally {
