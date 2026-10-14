@@ -13,7 +13,8 @@ import {
     getApiKeyUsage,
     getStats
 } from '../api-key-manager.js';
-import { presetUiList } from '../providers/provider-presets.js';
+import { presetUiList, userPresetProblem, normalizeUserPreset, isBuiltinPresetId, whitelistedUserPresetFields } from '../providers/provider-presets.js';
+import { upsertUserPreset, removeUserPreset } from '../providers/preset-store.js';
 
 export function handleListApiKeys(req, res) {
     const keys = listApiKeys();
@@ -98,4 +99,47 @@ export function handleGetApiKeyStats(req, res) {
  */
 export function handleListProviderPresets(req, res) {
     res.json({ presets: presetUiList() });
+}
+
+/**
+ * POST /api/providers/custom-presets
+ * Create or replace one user-defined preset (upsert by id) in
+ * ~/.cligate/provider-presets.json. The body is validated with the same
+ * rules the loader applies at startup, so an entry accepted here is one the
+ * loader will merge; request fields outside the preset schema are dropped.
+ * The in-memory preset index is NOT rebuilt yet — a server restart applies
+ * the change (the hot-reload pass removes this caveat).
+ */
+export function handleSaveCustomPreset(req, res) {
+    const body = req.body || {};
+    const entry = normalizeUserPreset({ id: typeof body.id === 'string' ? body.id.trim() : '', ...whitelistedUserPresetFields(body) });
+
+    const problem = userPresetProblem(entry);
+    if (problem) {
+        return res.status(400).json({ success: false, error: problem });
+    }
+
+    const result = upsertUserPreset(entry);
+    if (!result.success) {
+        return res.status(500).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, id: entry.id, replaced: result.replaced, requiresRestart: true });
+}
+
+/**
+ * DELETE /api/providers/custom-presets/:id
+ * Remove one user-defined preset from the file. Built-ins are protected.
+ */
+export function handleDeleteCustomPreset(req, res) {
+    const { id } = req.params;
+    if (isBuiltinPresetId(id)) {
+        return res.status(400).json({ success: false, error: `"${id}" is a built-in preset and cannot be deleted` });
+    }
+
+    const result = removeUserPreset(id);
+    if (!result.success) {
+        const status = result.error === 'not found' ? 404 : 500;
+        return res.status(status).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, requiresRestart: true });
 }

@@ -44,10 +44,8 @@
  *                                 shown next to the key (see openai-compatible.js fetchUsage).
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { CONFIG_DIR } from '../account-manager.js';
 import { TIERS } from '../model-tiers.js';
+import { readUserPresetsFile, USER_PRESETS_FILE } from './preset-store.js';
 
 export const PROVIDER_PRESETS = [
   {
@@ -296,13 +294,22 @@ export const PROVIDER_PRESETS = [
 
 // ─── User-defined presets (~/.cligate/provider-presets.json) ────────────────
 
-const USER_PRESETS_FILE = join(CONFIG_DIR, 'provider-presets.json');
+// File I/O lives in preset-store.js (raw read + atomic write); this module
+// owns the schema: validation, normalization, and the built-ins-first merge.
 const PRESET_API_FORMATS = new Set(['openai_chat', 'openai_responses', 'anthropic', 'gemini_native']);
 const PRESET_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const PRESET_TIER_KEYS = TIERS;
 const USAGE_FORMATS = new Set(['cline-plan', 'ollama-balance']);
 
-function userPresetProblem(entry) {
+// Fields the custom-preset API may write; everything else in a request body
+// is dropped so the file can't gain keys the loader doesn't understand.
+const PRESET_WRITABLE_FIELDS = [
+  'label', 'labelKey', 'badge', 'apiFormat', 'baseUrl', 'website', 'keyHint',
+  'models', 'tiers', 'pricing', 'nativeModelPrefixes', 'passthroughModelMatch',
+  'validateModel', 'usage',
+];
+
+export function userPresetProblem(entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
     return 'entry must be an object';
   }
@@ -357,7 +364,7 @@ function userPresetProblem(entry) {
   return null;
 }
 
-function normalizeUserPreset(entry) {
+export function normalizeUserPreset(entry) {
   return {
     label: entry.label || entry.id,
     badge: entry.badge || entry.id.slice(0, 2).toUpperCase(),
@@ -366,37 +373,38 @@ function normalizeUserPreset(entry) {
   };
 }
 
+/** True when the id belongs to a built-in preset (not deletable via the API). */
+export const isBuiltinPresetId = (id) => BUILTIN_PRESET_IDS.has(id);
+
+/** Drop request-body fields outside the preset schema before persisting. */
+export const whitelistedUserPresetFields = (body) =>
+  Object.fromEntries(PRESET_WRITABLE_FIELDS
+    .filter((field) => body?.[field] !== undefined)
+    .map((field) => [field, body[field]]));
+
 function loadUserPresets() {
-  if (!existsSync(USER_PRESETS_FILE)) return [];
-
-  try {
-    const parsed = JSON.parse(readFileSync(USER_PRESETS_FILE, 'utf8'));
-    const entries = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.presets) ? parsed.presets : null);
-    if (!entries) {
-      console.warn(`[ProviderPresets] ${USER_PRESETS_FILE} must contain an array of presets (or { presets: [...] }) — ignored`);
-      return [];
-    }
-
-    const seen = new Set();
-    const result = [];
-    for (const entry of entries) {
-      const problem = userPresetProblem(entry);
-      if (problem) {
-        console.warn(`[ProviderPresets] Skipping user preset: ${problem}`);
-        continue;
-      }
-      if (seen.has(entry.id)) {
-        console.warn(`[ProviderPresets] Skipping duplicate user preset id "${entry.id}"`);
-        continue;
-      }
-      seen.add(entry.id);
-      result.push(normalizeUserPreset(entry));
-    }
-    return result;
-  } catch (err) {
-    console.warn(`[ProviderPresets] Failed to load ${USER_PRESETS_FILE}: ${err.message} — user presets ignored`);
+  const entries = readUserPresetsFile();
+  if (entries === null) {
+    console.warn(`[ProviderPresets] ${USER_PRESETS_FILE} must contain an array of presets (or { presets: [...] }) — ignored`);
     return [];
   }
+
+  const seen = new Set();
+  const result = [];
+  for (const entry of entries) {
+    const problem = userPresetProblem(entry);
+    if (problem) {
+      console.warn(`[ProviderPresets] Skipping user preset: ${problem}`);
+      continue;
+    }
+    if (seen.has(entry.id)) {
+      console.warn(`[ProviderPresets] Skipping duplicate user preset id "${entry.id}"`);
+      continue;
+    }
+    seen.add(entry.id);
+    result.push(normalizeUserPreset(entry));
+  }
+  return result;
 }
 
 // Built-ins first, user entries after. Ids are unique across the merged list
